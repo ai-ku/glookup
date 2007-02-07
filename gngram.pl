@@ -12,6 +12,74 @@ my $GCacheHandle;		# file handle to append to the cache file
 my %GCache;			# ngram => freq values from cache
 my @GIndex;			# $GIndex[n][k] = first entry in ngm file k
 
+# gpair(a,b) gives the number of times a and b appear within a five
+# word window.
+
+sub gpair {
+    my ($a, $b) = @_;
+
+    # Initialize and search the cache:
+    # :: does not exist as a google token so we use "a :: b" for
+    # caching pairs
+    if (not %GCache) { 	ginit(); }
+    my $gcount = $GCache{"$a :: $b"}; 
+    if (defined $gcount) { return $gcount; }
+    $gcount = $GCache{"$b :: $a"};
+    if (defined $gcount) { return $gcount; }
+    
+    $gcount = 0;
+    for (my $n = 2; $n <= 5; $n++) {
+	$gcount += gpair_aux($a, $b, $n);
+	$gcount += gpair_aux($b, $a, $n);
+    }
+    
+    # Record the answer and return:
+    my $query = "$a :: $b";
+    $GCache{$query} = $gcount;
+    print $GCacheHandle "$query\t$gcount\n";
+    return $gcount;
+}
+
+# gpair_aux: find cnt of ngrams that start with a and end with b
+
+sub gpair_aux {
+    my ($a, $b, $n) = @_;
+    my $gcount = 0;
+    my $file = gfile($a, $n);
+    if (not defined $file) { return 0; }
+    my $handle = new IO::File;
+    $handle->open("< $file") or die "$file: $!";
+    my @stat = stat $handle;
+    my $size = $stat[7];
+    # "binary_search" implements a generic binary search algorithm returning
+    # the position of the first record whose index value is greater than or
+    # equal to $val.
+    my $pos = binary_search(0, $size, $a, \&gread, $handle);
+    seek($handle, $pos, SEEK_SET)
+	or die "Cannot seek to $pos";
+    my $done = 0;
+    while(<$handle>) {
+	my ($ngram, $cnt) = split(/[\t\n]/);
+	my @ngram = split(/ /, $ngram);
+	if ($ngram[0] ne $a) {
+	    $done = 1;
+	    last;
+	}
+	if ($ngram[$#ngram] eq $b) {
+	    # warn $_;
+	    $gcount += $cnt;
+	}
+    }
+    warn "Known bug: word split between two google files: $file\n"
+	unless $done;
+    $handle->close;
+    return $gcount;
+}
+
+
+# gngram gets the count of an ngram string consisting of n space
+# separated words.
+
 sub gngram {
     my ($query) = @_;
 
@@ -118,9 +186,11 @@ sub gtokenize {
 # gfile(): Finds the file in which a given query may be found.
 
 sub gfile {
-    my $query = shift;
+    my ($query, $nword) = @_;
     my @query = split(' ', $query);
-    my $nword = scalar(@query);
+    if (not defined $nword) {
+	$nword = scalar(@query);
+    }
     if ($nword == 1) {
 	return "$GDataDir/1gms/vocab";
     } elsif ($nword > 5) {
