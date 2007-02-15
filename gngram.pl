@@ -5,11 +5,11 @@ use Search::Binary;
 use Data::Dumper;
 require 'fileio.pl';
 
+$main::GTotal;		       # total number of words from 1gms/total
 my $GDataDir = '/mnt/sdc1/google-ngram'; # google data, subdirs 1gms .. 5gms
 my $GCachePath = 'gngram.cache'; # file to use as cache
 my $GCacheHandle;		# file handle to append to the cache file
 my %GCache;			# ngram => freq values from cache
-my $GTotal;		       # total number of words from 1gms/total
 my @GIndex;			# $GIndex[n][k] = first entry in ngm file k
 
 # gpair(a,b) gives the number of times a and b appear within a five
@@ -33,6 +33,8 @@ sub gpair {
 sub gngram {
     my ($query) = @_;
 
+    die 'No query' if not defined $query or $query eq '';
+
     # Initialize and search the cache:
     if (not %GCache) { 	ginit(); }
     my $gcount = $GCache{$query};
@@ -44,7 +46,7 @@ sub gngram {
     die "gfile error" if (not defined $file);
     # warn "file=$file\n";
     my $handle = new IO::File;
-    $handle->open("< $file") or die "$file: $!";
+    $handle->open("< $file") or die "$file: (query=$query) $!";
     my @stat = stat $handle;
     my $size = $stat[7];
     # warn Dumper($handle);
@@ -110,9 +112,9 @@ sub gread {
 
 sub ginit {
     readfile("$GDataDir/1gms/total", sub {
-	$GTotal = 0 + $_;
+	$main::GTotal = 0 + $_;
     });
-    warn "ginit: gtotal = $GTotal\n";
+    warn "ginit: gtotal = $main::GTotal\n";
     for my $n (2, 3, 4, 5) {
 	readfile("$GDataDir/${n}gms/${n}gm.idx", sub {
 	    push @{$GIndex[$n]}, $_[1];
