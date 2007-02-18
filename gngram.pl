@@ -5,7 +5,7 @@ use Search::Binary;
 use Data::Dumper;
 require 'fileio.pl';
 
-$main::GTotal;		       # total number of words from 1gms/total
+$main::GTotal = 0;	       # total number of words from 1gms/total
 my $GDataDir = '/mnt/sdc1/google-ngram'; # google data, subdirs 1gms .. 5gms
 my $GCachePath = 'gngram.cache'; # file to use as cache
 my $GCacheHandle;		# file handle to append to the cache file
@@ -57,6 +57,10 @@ sub gngram {
     my $pos = binary_search(0, $size, $query, \&gread, $handle);
 
     # warn "pos=$pos\n";
+    if (not defined $pos) {
+	warn "Warning: binary_search returned undef (0, $size, $query, $file)\n";
+	return 0;
+    }
     seek($handle, $pos, SEEK_SET)
 	or die "Cannot seek to $pos";
     my $record = <$handle>;
@@ -100,7 +104,7 @@ sub gread {
     }
     my $readpos = tell($handle);
     die "Cannot tell position" if $readpos < 0;
-    $_ = <$handle>;
+    return if (not defined ($_ = <$handle>));
     my ($ngram, $cnt) = split(/\t/);
     my $readcmp = ($val cmp $ngram);
     # warn "pos=$readpos cmp=$readcmp $ngram\n";
