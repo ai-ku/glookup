@@ -36,7 +36,7 @@ sub gngram {
     die 'No query' if not defined $query or $query eq '';
 
     # Initialize and search the cache:
-    if (not %GCache) { 	ginit(); }
+    if (not $main::GTotal) { ginit(); }
     my $gcount = $GCache{$query};
     if (defined $gcount) { return $gcount; }
 
@@ -115,6 +115,7 @@ sub gread {
 # opens the cache file for appending.
 
 sub ginit {
+    return if $main::GTotal;
     readfile("$GDataDir/1gms/total", sub {
 	$main::GTotal = 0 + $_;
     });
