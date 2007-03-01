@@ -2,8 +2,8 @@
 use strict;
 use Getopt::Std;
 require 'gngram.pl';
-my %opts; getopt('n', \%opts);
-my $ngram = defined $opts{n} ? $opts{n} : 1;
+my %opts = ('n' => 1, 'a' => 1, 'b' => 0);
+getopt('nab', \%opts);
 
 ginit();
 my $nword;
@@ -30,7 +30,7 @@ while(<>) {
     next if $skip;
     for (my $i = 1; $i < $#s; $i++) {
 	$nword++;
-	$nbits += bits(\@s, $i, $ngram);
+	$nbits += bits(\@s, $i, $opts{n});
     }
 }
 
@@ -57,19 +57,33 @@ sub bits {
 	my $a = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);	# a = n-1 word prefix
 	my $ga = gngram($a);				# ga = count of a
 	my $x = bits($s, $i, $n-1);			# x = lower order model bits
-	if ($ga == 0) { return $x; }		      # is this right?
+	if ($ga == 0) { 
+	    warn "Warning: Zero a-count[$a]\n";
+	    return $x;				      # is this right?
+	}
 	my $px = exp2(-$x);				# px = lower order model probability
 	my $b = $a . " $s->[$i]";			# b = all n words
 	my $gb = gngram($b);				# gb = count of b
 	my $c = $a . " :?:";				# c = all ngrams that start with a
 	my $gc = gngram($c);				# gc = count of c
 	my $missing_count = $ga - $gc;			# missing_count = occurances of (a) 
-	# warn "[$a]=$ga [$b]=$gb [$c]=$gc\n";
+							#   that are missing from ngram data
 	my $pb;
 	if ($missing_count > 0) {
-	    $pb = ($gb + $missing_count * $px) / $ga;	# our smoothing formula
+	    my $extra = $opts{a} * $missing_count + $opts{b};
+	    $pb = ($gb + $px * ($missing_count + $extra)) # our smoothing formula
+		/ ($ga + $extra);
 	} else {
-	    $pb = ($gb + $px) / ($ga + 1);		# if no missing count
+
+# If there is no missing count, surprizingly it is better to ignore
+# the context and just use the backed-off model.  This happens for
+# punctuation marks which probably have buggy counts.  For example,
+# semi-colon seems to end sentences, so there are no regular words
+# following it.
+	    
+	    # $pb = ($gb + $ga * $opts{c} * $px) / ($ga * (1 + $opts{c})); # if no missing count
+	    $pb = $px;
+	    warn "Warning: Zero b-count[$b] and zero missing_count\n" if $gb == 0;
 	}
 	return -log2($pb);
     }
