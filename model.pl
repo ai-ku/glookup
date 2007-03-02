@@ -1,22 +1,34 @@
 #!/usr/bin/perl -w
 use strict;
-use Getopt::Std;
-require 'gngram.pl';
-my %opts = ('n' => 1, 'a' => 1, 'b' => 0);
-getopt('nab', \%opts);
+my $log2 = log(2);
 
-ginit();
+use Getopt::Long;
+my $ngram = 1;
+my @A = (1, 1,  1.2, 2.3, 1, 1);
+my @B = (0, 0, 1000, 1, 1, 1);
+GetOptions('ngram=i' => \$ngram,
+	   'a2=f' => \$A[2],
+	   'a3=f' => \$A[3],
+	   'a4=f' => \$A[4],
+	   'a5=f' => \$A[5],
+	   'b2=f' => \$B[2],
+	   'b3=f' => \$B[3],
+	   'b4=f' => \$B[4],
+	   'b5=f' => \$B[5]);
+
+require 'gngram.pl';
+my $gtotal = ginit();
+my $logtotal = log2($gtotal);
+
 my $nword;
 my $nbits;
 my $nline;
-my $log2 = log(2);
-my $logtotal = log2($::GTotal);
 
 while(<>) {
     $nline++;
-    s/([a-z]) n't/$1n't/g;
+    s/\bn't\b/not/g;
     s/(\w)([-\/])(\w)/$1 $2 $3/gi;
-    s/(\w)([-.;,\/\'\%\)]) /$1 $2 /gi;
+    s/(\w)([-;,\/\'\%\)]) /$1 $2 /gi;
     s/(\S)(\'[s]) /$1 $2 /gi;
     s/ ([\$\%\(\`])(\w)/ $1 $2/g;
     my @s = ('<S>', split(), '</S>');
@@ -30,7 +42,7 @@ while(<>) {
     next if $skip;
     for (my $i = 1; $i < $#s; $i++) {
 	$nword++;
-	$nbits += bits(\@s, $i, $opts{n});
+	$nbits += bits(\@s, $i, $ngram);
     }
 }
 
@@ -70,31 +82,30 @@ sub bits {
 							#   that are missing from ngram data
 	my $pb;
 	if ($missing_count > 0) {
-	    my $extra = $opts{a} * $missing_count + $opts{b};
+	    my $extra = $A[$n] * $missing_count + $B[$n];
 	    $pb = ($gb + $px * ($missing_count + $extra)) # our smoothing formula
 		/ ($ga + $extra);
-	} else {
+	} elsif ($missing_count == 0) {
 
 # If there is no missing count, surprizingly it is better to ignore
 # the context and just use the backed-off model.  This happens for
 # punctuation marks which probably have buggy counts.  For example,
 # semi-colon seems to end sentences, so there are no regular words
-# following it.
+# following it.  In fact the only three cases are [!], [?], [;].
 	    
-	    # $pb = ($gb + $ga * $opts{c} * $px) / ($ga * (1 + $opts{c})); # if no missing count
 	    $pb = $px;
-	    warn "Warning: Zero b-count[$b] and zero missing_count\n" if $gb == 0;
+	    warn "Warning: New zero missing_count [$b] ga=$ga gb=$gb gc=$gc\n"
+		unless $a =~ /^[;!?]$/;
+	} else {
+
+# This is a bug in gngram.  This means there are more instances of
+# words following "A" than there are instances of "A" by itself.
+
+	    warn "Warning: New negative missing_count [$b] ga=$ga gb=$gb gc=$gc\n"
+		unless $a =~ /^A$/;
+	    $pb = ($gb + $px) / ($gc + 1);
 	}
 	return -log2($pb);
     }
 }
 
-sub smooth {
-    my ($a) = @_;
-    my $ga = gngram($a);
-    die if $ga == 0;
-    my $gb = gngram($a . " :?:");
-    my $h = $gb/$ga;
-    die if $h == 1;
-    return $h;
-}
