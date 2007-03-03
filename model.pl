@@ -52,7 +52,7 @@ while(<>) {
     }
 }
 
-printf "%d %f\n", $nword, $nbits/$nword;
+print $nword . ' ' . ($nbits/$nword) . "\n";
 
 # bits(s,i,n): returns the number of bits according to an n-gram model
 # for the i'th word in sentence s.  n defaults to 1.  The assumption
