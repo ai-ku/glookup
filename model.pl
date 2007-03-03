@@ -1,11 +1,17 @@
 #!/usr/bin/perl -w
 use strict;
+
 my $log2 = log(2);
+sub log2 { log($_[0])/$log2; }
+sub exp2 { exp($_[0]*$log2); }
+my $log10 = log(10);
+sub log10 { log($_[0])/$log10; }
+sub exp10 { exp($_[0]*$log10); }
 
 use Getopt::Long;
 my $ngram = 1;
-my @A = (undef, undef,  1.1, 3.0, 3.7, 5.4);
-my @B = (undef, undef, 1500, 100, 200, 200);
+my @A = (undef, undef, 1.1, 3.0, 3.7, 5.4);
+my @B = (undef, undef, 3.2, 2.0, 2.3, 2.3);
 GetOptions('ngram=i' => \$ngram,
 	   'a2=f' => \$A[2],
 	   'a3=f' => \$A[3],
@@ -48,9 +54,6 @@ while(<>) {
 
 printf "%d %f\n", $nword, $nbits/$nword;
 
-sub log2 { log($_[0])/$log2; }
-sub exp2 { exp($_[0]*$log2); }
-
 # bits(s,i,n): returns the number of bits according to an n-gram model
 # for the i'th word in sentence s.  n defaults to 1.  The assumption
 # is that the first order model is complete, i.e. there are no unknown
@@ -83,7 +86,7 @@ sub bits {
 							#   that are missing from ngram data
 	my $pb;
 	if ($missing_count > 0) {			# apply our smoothing formula
-	    my $extra = $A[$n] * $missing_count + $B[$n];
+	    my $extra = $A[$n] * $missing_count + exp10($B[$n]);
 	    $pb = ($gb + $px * ($missing_count + $extra)) 
 		/ ($ga + $extra);
 	} elsif ($missing_count == 0) {
