@@ -1,5 +1,6 @@
 #!/usr/bin/perl -w
 use strict;
+warn '$Id$' ."\n";
 
 my $log2 = log(2);
 sub log2 { log($_[0])/$log2; }
@@ -9,10 +10,12 @@ sub log10 { log($_[0])/$log10; }
 sub exp10 { exp($_[0]*$log10); }
 
 use Getopt::Long;
+my $verbose = 0;
 my $ngram = 1;
 my @A = (undef, undef, 1.1, 3.0, 3.7, 5.4);
 my @B = (undef, undef, 3.2, 2.0, 2.3, 2.3);
-GetOptions('ngram=i' => \$ngram,
+GetOptions('verbose' => \$verbose,
+	   'ngram=i' => \$ngram,
 	   'a2=f' => \$A[2],
 	   'a3=f' => \$A[3],
 	   'a4=f' => \$A[4],
@@ -32,7 +35,7 @@ my $nline;
 
 while(<>) {
     $nline++;
-    s/\bn't\b/not/g;
+    s/\bn\'t\b/not/g;
     s/(\w)([-\/])(\w)/$1 $2 $3/gi;
     s/(\w)([-;,\/\'\%\)]) /$1 $2 /gi;
     s/(\S)(\'[s]) /$1 $2 /gi;
@@ -48,8 +51,11 @@ while(<>) {
     next if $skip;
     for (my $i = 1; $i < $#s; $i++) {
 	$nword++;
-	$nbits += bits(\@s, $i, $ngram);
+	my $b = bits(\@s, $i, $ngram);
+	$nbits += $b;
+	printf("%s(%.2f) ", $s[$i], $b) if $verbose;
     }
+    print "\n" if $verbose;
 }
 
 print $nword . ' ' . ($nbits/$nword) . "\n";
