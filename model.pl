@@ -4,8 +4,8 @@ my $log2 = log(2);
 
 use Getopt::Long;
 my $ngram = 1;
-my @A = (1, 1,  1.2, 2.3, 1, 1);
-my @B = (0, 0, 1000, 1, 1, 1);
+my @A = (undef, undef,  1.1, 3.0, 3.7, 5.4);
+my @B = (undef, undef, 1500, 100, 200, 200);
 GetOptions('ngram=i' => \$ngram,
 	   'a2=f' => \$A[2],
 	   'a3=f' => \$A[3],
@@ -70,8 +70,9 @@ sub bits {
 	my $ga = gngram($a);				# ga = count of a
 	my $x = bits($s, $i, $n-1);			# x = lower order model bits
 	if ($ga == 0) { 
-	    warn "Warning: Zero a-count[$a]\n";
-	    return $x;				      # is this right?
+	    warn "Warning: Zero a-count[$a]\n" 
+		if $n <= 3 and $a =~ /[^\w ]/;		# check what is going on with punctuation
+	    return $x;					# return lower order result
 	}
 	my $px = exp2(-$x);				# px = lower order model probability
 	my $b = $a . " $s->[$i]";			# b = all n words
@@ -81,9 +82,9 @@ sub bits {
 	my $missing_count = $ga - $gc;			# missing_count = occurances of (a) 
 							#   that are missing from ngram data
 	my $pb;
-	if ($missing_count > 0) {
+	if ($missing_count > 0) {			# apply our smoothing formula
 	    my $extra = $A[$n] * $missing_count + $B[$n];
-	    $pb = ($gb + $px * ($missing_count + $extra)) # our smoothing formula
+	    $pb = ($gb + $px * ($missing_count + $extra)) 
 		/ ($ga + $extra);
 	} elsif ($missing_count == 0) {
 
@@ -93,15 +94,19 @@ sub bits {
 # semi-colon seems to end sentences, so there are no regular words
 # following it.  In fact the only three cases are [!], [?], [;].
 	    
-	    $pb = $px;
-	    warn "Warning: New zero missing_count [$b] ga=$ga gb=$gb gc=$gc\n"
-		unless $a =~ /^[;!?]$/;
-	} else {
+	    if ($a =~ /[;!?]/) {
+		$pb = $px;
+	    } else {
+		# In other cases we have a legitimate 100% ngram:
+		warn "Warning: Zero missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
+		$pb = ($gb + $px) / ($ga + 1);
+	    }
+	} elsif ($missing_count < 0) {
 
 # This is a bug in gngram.  This means there are more instances of
 # words following "A" than there are instances of "A" by itself.
 
-	    warn "Warning: New negative missing_count [$b] ga=$ga gb=$gb gc=$gc\n"
+	    warn "Warning: Negative missing_count [$b] ga=$ga gb=$gb gc=$gc\n"
 		unless $a =~ /^A$/;
 	    $pb = ($gb + $px) / ($gc + 1);
 	}
