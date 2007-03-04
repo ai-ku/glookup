@@ -5,7 +5,7 @@ use Search::Binary;
 use Data::Dumper;
 require 'fileio.pl';
 
-$main::GTotal = 0;	       # total number of words from 1gms/total
+my $GTotal = 0;		       # total number of words from 1gms/total
 my $GDataDir = '/mnt/sdc1/google-ngram'; # google data, subdirs 1gms .. 5gms
 my $GCachePath = 'gngram.cache'; # file to use as cache
 my $GCacheHandle;		# file handle to append to the cache file
@@ -36,7 +36,7 @@ sub gngram {
     die 'No query' if not defined $query or $query eq '';
 
     # Initialize and search the cache:
-    if (not $main::GTotal) { ginit(); }
+    if (not $GTotal) { ginit(); }
     my $gcount = $GCache{$query};
     if (defined $gcount) { return $gcount; }
 
@@ -112,14 +112,14 @@ sub gread {
 }
 
 # ginit(): reads the cache file, the index (first ngram) files, and
-# opens the cache file for appending.
+# opens the cache file for appending.  Returns total count.
 
 sub ginit {
-    return if $main::GTotal;
+    return $GTotal if $GTotal > 0;
     readfile("$GDataDir/1gms/total", sub {
-	$main::GTotal = 0 + $_;
+	$GTotal = 0 + $_;
     });
-    warn "ginit: gtotal = $main::GTotal\n";
+    warn "ginit: gtotal = $GTotal\n";
     for my $n (2, 3, 4, 5) {
 	readfile("$GDataDir/${n}gms/${n}gm.idx", sub {
 	    push @{$GIndex[$n]}, $_[1];
@@ -127,8 +127,13 @@ sub ginit {
     }
     $GCacheHandle = new IO::File ">>$GCachePath";
     readfile($GCachePath, sub {
-	$GCache{$_[0]} = 0 + $_[1];
-    }, "\t");
+	unless (/^(.+?)\t(\d+)\n$/) {
+	    warn "Warning: Incomplete cache line [$_]\n";
+	    return;
+	}
+	$GCache{$1} = 0 + $2;
+    });
+    return $GTotal;
 }
 
 # gtokenize(): 's, 'd etc. split, n't not split. intra-word dash
@@ -148,35 +153,42 @@ sub gtokenize {
 sub gfile {
     my ($query) = @_;
     my @query = split(' ', $query);
-    my ($nword, $pair);
+    my $nword = scalar(@query);
+    my $type = 'ngram';
+
+    # Handle special query types:
     if (scalar(@query) == 3 and $query[1] =~ /^:(\d):$/) {
+	$type = 'pair';
 	$nword = $1;
-	die "nword=$nword out of range" if ($nword < 3) or ($nword > 5);
-	$pair = 1;
-    } else {
-	$nword = scalar(@query);
-	$pair = 0;
+	die "nword=$nword out of range" unless $nword =~ /^[345]$/;
+    } elsif ($query[$#query] eq ':?:') {
+	$type = 'left';
     }
+
     if ($nword == 1) {
 	return "$GDataDir/1gms/vocab";
-    } elsif ($nword > 5) {
+    } elsif ($nword !~ /^[2345]$/) {
 	die "Do not have $nword-grams";
     }
-    my $file;
+    my $search;
+    if ($type eq 'ngram') { $search = $query; }
+    elsif ($type eq 'pair') { $search = $query[0]; }
+    elsif ($type eq 'left') { $search = $query; $search =~ s/ :\?:$//; }
     my $idx = $GIndex[$nword];
-    my $search = $pair ? $query[0] : $query;
+    my $file;
+    # warn "query = [$query], nword = $nword, type = $type, search = [$search]\n";
     for (my $i = 0; $i <= $#{$idx}; $i++) {
 	my $first = $idx->[$i];
 	if (($first cmp $search) > 0) {
-	    if ($i == 0) { return; }
-	    $i--;
+	    $i-- if $i > 0;
 	    $file = sprintf("%s/%dgms/%dgm-%04d", $GDataDir, $nword, $nword, $i);
 	    last;
 	}
     }
     $file = sprintf("%s/%dgms/%dgm-%04d", $GDataDir, $nword, $nword, $#{$idx})
 	if not defined $file;
-    $file .= '.pair' if $pair;
+    $file .= '.pair' if $type eq 'pair';
+    $file .= '.left' if $type eq 'left';
     return $file;
 }
 
