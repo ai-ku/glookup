@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 use strict;
-warn '$Id: model.pl,v 1.9 2007/03/03 14:13:15 dyuret Exp dyuret $' ."\n";
+warn '$Id: model.pl,v 1.10 2007/03/04 10:01:38 dyuret Exp dyuret $' ."\n";
 
 my $log2 = log(2);
 sub log2 { log($_[0])/$log2; }
@@ -15,7 +15,7 @@ my $cachefile;
 my $ngram = 1;
 my @A = (undef, undef, 4.5725, 5.2775, 4.9850, 3.9550);
 my @B = (undef, undef, 2.5375, 2.1850, 2.1450, 2.2475);
-GetOptions('cache' => \$cachefile,
+GetOptions('cache=s' => \$cachefile,
 	   'verbose' => \$verbose,
 	   'ngram=i' => \$ngram,
 	   'a2=f' => \$A[2],
@@ -55,7 +55,13 @@ while(<>) {
 	$nword++;
 	my $b = bits(\@s, $i, $ngram);
 	$nbits += $b;
-	printf("%s(%.2f) ", $s[$i], $b) if $verbose;
+	if ($verbose) {
+	    print $s[$i];
+	    for (my $n = 1; $n < $ngram; $n++) {
+		printf "\t%.4f", bits(\@s, $i, $n);
+	    }
+	    printf "\t%.4f\n", $b;
+	}
     }
     print "\n" if $verbose;
 }
