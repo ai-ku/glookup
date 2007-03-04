@@ -5,9 +5,9 @@ use Search::Binary;
 use Data::Dumper;
 require 'fileio.pl';
 
-my $GTotal = 0;		       # total number of words from 1gms/total
+my $GTotal;		       # total number of words from 1gms/total
 my $GDataDir = '/mnt/sdc1/google-ngram'; # google data, subdirs 1gms .. 5gms
-my $GCachePath = 'gngram.cache'; # file to use as cache
+my $GCachePath;			# file to use as cache
 my $GCacheHandle;		# file handle to append to the cache file
 my %GCache;			# ngram => freq values from cache
 my @GIndex;			# $GIndex[n][k] = first entry in ngm file k
@@ -70,7 +70,7 @@ sub gngram {
 
     # Record the answer and return:
     $GCache{$query} = $gcount;
-    print $GCacheHandle "$query\t$gcount\n";
+    print $GCacheHandle "$query\t$gcount\n" if $GCacheHandle;
     return $gcount;
 }
 
@@ -115,7 +115,8 @@ sub gread {
 # opens the cache file for appending.  Returns total count.
 
 sub ginit {
-    return $GTotal if $GTotal > 0;
+    my ($cachefile) = @_;
+    return $GTotal if $GTotal;
     readfile("$GDataDir/1gms/total", sub {
 	$GTotal = 0 + $_;
     });
@@ -125,14 +126,17 @@ sub ginit {
 	    push @{$GIndex[$n]}, $_[1];
 	}, "\t");
     }
-    $GCacheHandle = new IO::File ">>$GCachePath";
-    readfile($GCachePath, sub {
-	unless (/^(.+?)\t(\d+)\n$/) {
-	    warn "Warning: Incomplete cache line [$_]\n";
-	    return;
-	}
-	$GCache{$1} = 0 + $2;
-    });
+    if (defined $cachefile) {
+	$GCachePath = $cachefile;
+	$GCacheHandle = new IO::File ">>$GCachePath";
+	readfile($GCachePath, sub {
+	    unless (/^(.+?)\t(\d+)\n$/) {
+		warn "Warning: Incomplete cache line [$_]\n";
+		return;
+	    }
+	    $GCache{$1} = 0 + $2;
+	});
+    }
     return $GTotal;
 }
 
