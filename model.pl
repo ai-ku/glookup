@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 use strict;
-warn '$Id: model.pl,v 1.10 2007/03/04 10:01:38 dyuret Exp dyuret $' ."\n";
+warn '$Id: model.pl,v 1.11 2007/03/04 10:06:32 dyuret Exp dyuret $' ."\n";
 
 my $log2 = log(2);
 sub log2 { log($_[0])/$log2; }
@@ -37,12 +37,7 @@ my $nline;
 
 while(<>) {
     $nline++;
-    s/\bn\'t\b/not/g;
-    s/(\w)([-\/])(\w)/$1 $2 $3/gi;
-    s/(\w)([-;,\/\'\%\)]) /$1 $2 /gi;
-    s/(\S)(\'[s]) /$1 $2 /gi;
-    s/ ([\$\%\(\`])(\w)/ $1 $2/g;
-    my @s = ('<S>', split(), '</S>');
+    my @s = ('<S>', gtokenize($_), '</S>');
     my $skip = 0;
     for (my $i = 1; $i < $#s; $i++) {
 	if (gngram($s[$i]) == 0) { 
@@ -99,32 +94,40 @@ sub bits {
 	my $missing_count = $ga - $gc;			# missing_count = occurances of (a) 
 							#   that are missing from ngram data
 	my $pb;
-	if ($missing_count > 0) {			# apply our smoothing formula
-	    my $extra = $A[$n] * $missing_count + exp10($B[$n]);
-	    $pb = ($gb + $px * ($missing_count + $extra)) 
-		/ ($ga + $extra);
-	} elsif ($missing_count == 0) {
 
 # If there is no missing count, surprizingly it is better to ignore
 # the context and just use the backed-off model.  This happens for
 # punctuation marks which probably have buggy counts.  For example,
 # semi-colon seems to end sentences, so there are no regular words
-# following it.  In fact the only three cases are [!], [?], [;].
+# following it.  In fact the only three cases are [!], [?], [;].  I am
+# going to add [.] to the list for the same reason even though there
+# seem to be bigrams starting with [.].
 	    
-	    if ($a =~ /[;!?]/) {
-		$pb = $px;
-	    } else {
-		# In other cases we have a legitimate 100% ngram:
-		warn "Warning: Zero missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
-		$pb = ($gb + $px) / ($ga + 1);
+	my $bad_context = 0;
+	for my $tok (@{$s}[($i-$n+1) .. ($i-1)]) {
+	    if ($tok =~ /^[;!?.]$/) {
+		$bad_context = 1; last;
 	    }
+	}
+
+	if ($bad_context) {
+	    $pb = $px;
+
+	} elsif ($missing_count > 0) {			# apply our smoothing formula
+	    my $extra = $A[$n] * $missing_count + exp10($B[$n]);
+	    $pb = ($gb + $px * ($missing_count + $extra)) 
+		/ ($ga + $extra);
+
+	} elsif ($missing_count == 0) {
+	    warn "Warning: Zero missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
+	    $pb = ($gb + $px) / ($ga + 1);
+
 	} elsif ($missing_count < 0) {
 
 # This is a bug in gngram.  This means there are more instances of
 # words following "A" than there are instances of "A" by itself.
 
-	    warn "Warning: Negative missing_count [$b] ga=$ga gb=$gb gc=$gc\n"
-		unless $a =~ /^A$/;
+	    warn "Warning: Negative missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
 	    $pb = ($gb + $px) / ($gc + 1);
 	}
 	return -log2($pb);
