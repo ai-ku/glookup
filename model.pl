@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 use strict;
-warn '$Id$' ."\n";
+warn '$Id: model.pl,v 1.9 2007/03/03 14:13:15 dyuret Exp dyuret $' ."\n";
 
 my $log2 = log(2);
 sub log2 { log($_[0])/$log2; }
@@ -11,10 +11,12 @@ sub exp10 { exp($_[0]*$log10); }
 
 use Getopt::Long;
 my $verbose = 0;
+my $cachefile;
 my $ngram = 1;
-my @A = (undef, undef, 1.1, 3.0, 3.7, 5.4);
-my @B = (undef, undef, 3.2, 2.0, 2.3, 2.3);
-GetOptions('verbose' => \$verbose,
+my @A = (undef, undef, 4.5725, 5.2775, 4.9850, 3.9550);
+my @B = (undef, undef, 2.5375, 2.1850, 2.1450, 2.2475);
+GetOptions('cache' => \$cachefile,
+	   'verbose' => \$verbose,
 	   'ngram=i' => \$ngram,
 	   'a2=f' => \$A[2],
 	   'a3=f' => \$A[3],
@@ -26,7 +28,7 @@ GetOptions('verbose' => \$verbose,
 	   'b5=f' => \$B[5]);
 
 require 'gngram.pl';
-my $gtotal = ginit();
+my $gtotal = ginit($cachefile);
 my $logtotal = log2($gtotal);
 
 my $nword;
