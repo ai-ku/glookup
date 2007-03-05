@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn '$Id$' . "\n";
+warn '$Id: gngram.pl,v 1.10 2007/03/04 13:14:47 dyuret Exp dyuret $' . "\n";
 
 use strict;
 use IO::File;
@@ -242,6 +242,87 @@ sub gfile {
     $file .= '.pair' if $type eq 'pair';
     $file .= '.left' if $type eq 'left';
     return $file;
+}
+
+# gbits(s,i,n): returns the number of bits according to an n-gram model
+# for the i'th word in sentence s.  n defaults to 1.  The assumption
+# is that the first order model is complete, i.e. there are no unknown
+# words.  The first token in the sentence array should be <S>.
+
+# Supporting stuff for gbits
+my @A = (undef, undef, 5.47, 4.86, 4.8975, 4.7620);
+my @B = (undef, undef, 0.00, 0.00, 1.1752, 1.6780);
+my $log2 = log(2);
+sub log2 { log($_[0])/$log2; }
+sub exp2 { exp($_[0]*$log2); }
+my $log10 = log(10);
+sub log10 { log($_[0])/$log10; }
+sub exp10 { exp($_[0]*$log10); }
+
+sub gbits {
+    my ($s, $i, $n) = @_;
+    $n = 1 if not defined $n;
+    if ($n == 1) {
+	my $g = gngram($s->[$i]);
+	die "Unknown word [$s->[$i]]" if $g == 0;
+	return log2($GTotal / $g);
+    } elsif ($n > $i + 1) {
+	return gbits($s, $i, $i+1);
+    } else {
+	my $a = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);	# a = n-1 word prefix
+	my $ga = gngram($a);				# ga = count of a
+	my $x = gbits($s, $i, $n-1);			# x = lower order model bits
+	if ($ga == 0) { 
+	    warn "Warning: Zero a-count[$a]\n" 
+		if $n <= 3 and $a =~ /[^\w ]/;		# check what is going on with punctuation
+	    return $x;					# return lower order result
+	}
+	my $px = exp2(-$x);				# px = lower order model probability
+	my $b = $a . " $s->[$i]";			# b = all n words
+	my $gb = gngram($b);				# gb = count of b
+	my $c = $a . " :?:";				# c = all ngrams that start with a
+	my $gc = gngram($c);				# gc = count of c
+	my $missing_count = $ga - $gc;			# missing_count = occurances of (a) 
+							#   that are missing from ngram data
+	my $pb;
+
+# If there is no missing count, surprizingly it is better to ignore
+# the context and just use the backed-off model.  This happens for
+# punctuation marks which probably have buggy counts.  For example,
+# semi-colon seems to end sentences, so there are no regular words
+# following it.  In fact the only three cases are [!], [?], [;].  I am
+# going to add [.] to the list for the same reason even though there
+# seem to be bigrams starting with [.].
+	    
+	my $bad_context = 0;
+	for my $tok (@{$s}[($i-$n+1) .. ($i-1)]) {
+	    if ($tok =~ /^[;!?.]$/) {
+		$bad_context = 1; last;
+	    }
+	}
+
+	if ($bad_context) {
+	    $pb = $px;
+
+	} elsif ($missing_count > 0) {			# apply our smoothing formula
+	    my $extra = $A[$n] * $missing_count + exp10($B[$n]);
+	    $pb = ($gb + $px * ($missing_count + $extra)) 
+		/ ($ga + $extra);
+
+	} elsif ($missing_count == 0) {
+	    warn "Warning: Zero missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
+	    $pb = ($gb + $px) / ($ga + 1);
+
+	} elsif ($missing_count < 0) {
+
+# This is a bug in gngram.  This means there are more instances of
+# words following "A" than there are instances of "A" by itself.
+
+	    warn "Warning: Negative missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
+	    $pb = ($gb + $px) / ($gc + 1);
+	}
+	return -log2($pb);
+    }
 }
 
 1;
