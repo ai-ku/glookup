@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn '$Id: gngram.pl,v 1.10 2007/03/04 13:14:47 dyuret Exp dyuret $' . "\n";
+warn '$Id: gngram.pl,v 1.11 2007/03/05 20:13:59 dyuret Exp dyuret $' . "\n";
 
 use strict;
 use IO::File;
@@ -131,6 +131,7 @@ sub ginit {
     if (defined $cachefile) {
 	$GCachePath = $cachefile;
 	$GCacheHandle = new IO::File ">>$GCachePath";
+	$GCacheHandle->autoflush(1);
 	readfile($GCachePath, sub {
 	    unless (/^(.+?)\t(\d+)\n$/) {
 		warn "Warning: Incomplete cache line [$_]\n";
