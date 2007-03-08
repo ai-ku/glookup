@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn '$Id: gngram.pl,v 1.11 2007/03/05 20:13:59 dyuret Exp dyuret $' . "\n";
+warn '$Id: gngram.pl,v 1.12 2007/03/06 16:58:39 dyuret Exp dyuret $' . "\n";
 
 use strict;
 use IO::File;
@@ -96,12 +96,13 @@ sub gread {
     my ($handle, $val, $pos) = @_;
     # warn Dumper("gread", \@_);
     if (defined $pos) { 
-	seek($handle, $pos, SEEK_SET)
-	    or die "Cannot seek to $pos";
-	if ($pos > 0) { 
-	    # BUG?: must find the beginning of entry, but what if pos
-	    # is already at the beginning of one.
+	if ($pos > 0) {
+	    seek($handle, $pos - 1, SEEK_SET)
+		or die "Cannot seek to $pos";
 	    my $ignore = <$handle>;
+	} else {
+	    seek($handle, $pos, SEEK_SET)
+		or die "Cannot seek to $pos";
 	}
     }
     my $readpos = tell($handle);
