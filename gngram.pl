@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn '$Id: gngram.pl,v 1.13 2007/03/08 15:01:01 dyuret Exp dyuret $' . "\n";
+warn '$Id: gngram.pl,v 1.14 2007/03/14 16:01:36 dyuret Exp dyuret $' . "\n";
 
 use strict;
 use IO::File;
@@ -194,7 +194,8 @@ sub gtokenize {
     $str =~ s/(\S)(\'(d|em|ll|m|re|s|ve))\b/$1 $2/gi;
 
     # Intra word dashes and slashes are split:
-    $str =~ s/(\w)([\-\/])(\w)/$1 $2 $3/gi;
+    # Reason for while: otherwise vis-a-vis does not get split
+    while($str =~ s/(\w)([\-\/])(\w)/$1 $2 $3/gi) {};
 
     # Split periods at the end of a sentence:
     $str =~ s/(\w)(\.\W*)$/$1 $2/;
