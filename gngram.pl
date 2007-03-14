@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn '$Id: gngram.pl,v 1.12 2007/03/06 16:58:39 dyuret Exp dyuret $' . "\n";
+warn '$Id: gngram.pl,v 1.13 2007/03/08 15:01:01 dyuret Exp dyuret $' . "\n";
 
 use strict;
 use IO::File;
@@ -275,8 +275,8 @@ sub gbits {
 	my $ga = gngram($a);				# ga = count of a
 	my $x = gbits($s, $i, $n-1);			# x = lower order model bits
 	if ($ga == 0) { 
-	    warn "Warning: Zero a-count[$a]\n" 
-		if $n <= 3 and $a =~ /[^\w ]/;		# check what is going on with punctuation
+#	    warn "Warning: Zero a-count[$a]\n" 
+#		if $n <= 3 and $a =~ /[^\w ]/;		# check what is going on with punctuation
 	    return $x;					# return lower order result
 	}
 	my $px = exp2(-$x);				# px = lower order model probability
@@ -312,7 +312,7 @@ sub gbits {
 		/ ($ga + $extra);
 
 	} elsif ($missing_count == 0) {
-	    warn "Warning: Zero missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
+#	    warn "Warning: Zero missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
 	    $pb = ($gb + $px) / ($ga + 1);
 
 	} elsif ($missing_count < 0) {
