@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn '$Id: gngram.pl,v 1.14 2007/03/14 16:01:36 dyuret Exp dyuret $' . "\n";
+warn '$Id: gngram.pl,v 1.15 2007/03/14 16:12:51 dyuret Exp dyuret $' . "\n";
 
 use strict;
 use IO::File;
@@ -267,7 +267,15 @@ sub gbits {
     $n = 1 if not defined $n;
     if ($n == 1) {
 	my $g = gngram($s->[$i]);
-	die "Unknown word [$s->[$i]]" if $g == 0;
+
+	# BUG: Any word below 200 count is excluded from the google
+	# data.  We will give such words a count of 100.  Note that
+	# this may happen because of tokenization errors, and it is
+	# not probabilistically sound.
+
+	# die "Unknown word [$s->[$i]]" if $g == 0;
+	$g = 100 if $g == 0;
+
 	return log2($GTotal / $g);
     } elsif ($n > $i + 1) {
 	return gbits($s, $i, $i+1);
