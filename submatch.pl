@@ -1,4 +1,4 @@
-warn '$Id$' . "\n";
+warn '$Id: submatch.pl,v 1.1 2007/03/15 16:47:20 dyuret Exp dyuret $' . "\n";
 
 # submatch($head, $word, [$pos]): finds the versions of the word that
 # matches the head in terms of capitalization and morphology.
@@ -6,7 +6,7 @@ warn '$Id$' . "\n";
 # should be one of 'n', 'v', or 'a'.
 
 my %emw;
-my %var = ('n' => 2, 'a' => 3, 'v' => 5);
+my %var = ('n' => 2, 'v' => 5, 'a' => 3, 'r' => 3);
 
 # print join(' ', submatch(@ARGV)) . "\n";
 
@@ -24,6 +24,7 @@ sub submatch {
 
 sub mormatch {
     my ($head, $word, $pos) = @_;
+    return ($word) unless (defined $pos and defined $var{$pos});
     if (not %emw) {
 	open(FP, 'emw.dat') or return ($word);
 	while(<FP>) {
