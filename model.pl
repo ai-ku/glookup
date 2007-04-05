@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 use strict;
-warn '$Id: model.pl,v 1.12 2007/03/04 13:14:41 dyuret Exp dyuret $' ."\n";
+warn '$Id: model.pl,v 1.13 2007/03/05 20:13:45 dyuret Exp dyuret $' ."\n";
 
 require 'gngram.pl';
 use Getopt::Long;
@@ -22,6 +22,7 @@ GetOptions('cache=s' => \$cachefile,
 # 	   'b4=f' => \$B[4],
 # 	   'b5=f' => \$B[5]
 );
+ginit($cachefile);
 
 my $nword;
 my $nbits;
