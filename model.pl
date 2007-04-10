@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn '$Id: model.pl,v 1.14 2007/04/05 23:18:02 dyuret Exp dyuret $' ."\n";
+warn '$Id: model.pl,v 2.1 2007/04/10 10:11:35 dyuret Exp dyuret $' ."\n";
 
 use strict;
 use Getopt::Long;
@@ -18,9 +18,10 @@ my $random = 0;
 my $zeroes = 0;
 # smoothing = { linear, product, baseline }
 my $smoothing = 'linear';
-my @A = (undef, undef, 8.00, 6.00, 5.40, 4.89);
-my @B = (undef, undef, 0.00, 0.00, 0.00, 0.00);
-my @C = (undef, undef, 0.01, 0.01, 0.01, 0.01);
+my @A = (undef, undef, 6.3712181,  6.2403967, 6.2855943,  5.375136); # 8.06058787993131
+my @B = (undef, undef, 0.00,       0.00,      2.4973338,  2.457501); 
+my @C = (undef, undef, 0.12244049, 0.4886369, 0.74636033, 0.83561995); # 8.22092294839358
+my @D = (undef, undef, 6.7131229,  5.9414447, 6.5528203,  5.7060572); # 8.06083590891475
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
@@ -41,6 +42,10 @@ GetOptions('cache=s' => \$cachefile,
  	   'c3=f' => \$C[3],
  	   'c4=f' => \$C[4],
  	   'c5=f' => \$C[5],
+ 	   'd2=f' => \$D[2],
+ 	   'd3=f' => \$D[3],
+ 	   'd4=f' => \$D[4],
+ 	   'd5=f' => \$D[5],
 );
 
 my %init_fn = ('linear' => \&init_linear, 'product' => \&init_product, 'baseline' => \&init_baseline);
@@ -108,7 +113,7 @@ sub init_product {
     my $ndims = $ngram - 1;
     $init = $zeroes ? zeroes($ndims) 
 	: $random ? (10 * random($ndims))
-	: pdl(@A[2 .. $ngram]);
+	: pdl(@D[2 .. $ngram]);
     return $init;
 }
 
@@ -152,7 +157,7 @@ sub score_product {
     my $x = shift;
     $nscore++;
     for (my $i = 2; $i <= $ngram; $i++) {
-	$A[$i] = nonnegative($x->at($i - 2));
+	$D[$i] = nonnegative($x->at($i - 2));
     }
     my $bits = ngram();
     warn "score[$nscore]: $bits $x\n";
@@ -284,7 +289,7 @@ sub bits {
 	    $pb = ($gb + $px * ($missing_count + $extra)) 
 		/ ($ga + $extra);
 	} elsif ($smoothing eq 'product') {
-	    my $extra = $A[$n] * $missing_count;
+	    my $extra = $D[$n] * $missing_count;
 	    $pb = ($gb + $px * ($missing_count + $extra)) 
 		/ ($ga + $extra);
 	} elsif ($smoothing eq 'baseline') {
