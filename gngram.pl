@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn '$Id: gngram.pl,v 1.15 2007/03/14 16:12:51 dyuret Exp dyuret $' . "\n";
+warn '$Id: gngram.pl,v 1.16 2007/03/22 13:45:42 dyuret Exp dyuret $' . "\n";
 
 use strict;
 use IO::File;
@@ -44,6 +44,7 @@ sub gngram {
 
     # Could not find in cache, need to look for it in data file:
     # warn "query=$query\n";
+    die "[$query] not found in cache" if not @GIndex;
     my $file = gfile($query);
     die "gfile error" if (not defined $file);
     # warn "file=$file\n";
@@ -120,14 +121,18 @@ sub gread {
 sub ginit {
     my ($cachefile) = @_;
     return $GTotal if $GTotal;
-    readfile("$GDataDir/1gms/total", sub {
-	$GTotal = 0 + $_;
-    });
-    warn "ginit: gtotal = $GTotal\n";
-    for my $n (2, 3, 4, 5) {
-	readfile("$GDataDir/${n}gms/${n}gm.idx", sub {
-	    push @{$GIndex[$n]}, $_[1];
-	}, "\t");
+    if (-r "$GDataDir/1gms/total") {
+	readfile("$GDataDir/1gms/total", sub {
+	    $GTotal = 0 + $_;
+	});
+	for my $n (2, 3, 4, 5) {
+	    readfile("$GDataDir/${n}gms/${n}gm.idx", sub {
+		push @{$GIndex[$n]}, $_[1];
+	    }, "\t");
+	}
+    } else {
+	warn "Warning: Cannot find Google ngrams, relying on the cache\n";
+	$GTotal = 1024908267229;
     }
     if (defined $cachefile) {
 	$GCachePath = $cachefile;
@@ -141,6 +146,7 @@ sub ginit {
 	    $GCache{$1} = 0 + $2;
 	});
     }
+    warn "ginit: gtotal = $GTotal\n";
     return $GTotal;
 }
 
