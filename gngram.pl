@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn '$Id: gngram.pl,v 1.16 2007/03/22 13:45:42 dyuret Exp dyuret $' . "\n";
+warn q{$Id: gngram.pl,v 1.17 2007/04/10 10:12:08 dyuret Exp dyuret $} . "\n";
 
 use strict;
 use IO::File;
@@ -11,8 +11,15 @@ my $GTotal;		       # total number of words from 1gms/total
 my $GDataDir = '/mnt/sdc1/google-ngram'; # google data, subdirs 1gms .. 5gms
 my $GCachePath;			# file to use as cache
 my $GCacheHandle;		# file handle to append to the cache file
-my %GCache;			# ngram => freq values from cache
 my @GIndex;			# $GIndex[n][k] = first entry in ngm file k
+				
+my %GCache =			# ngram => freq values from cache
+    (				# initialize with some special values
+     ':?:' => 1024908267229,	# number of tokens
+     '_' => 13588391,		# number of unigrams
+     '_ _' => 314843401,	# number of bigrams
+     );
+     
 
 # gpair(a,b) gives the number of times a and b appear within a five
 # word window.
@@ -61,7 +68,7 @@ sub gngram {
 
     # warn "pos=$pos\n";
     if (not defined $pos) {
-	warn "Warning: binary_search returned undef (0, $size, $query, $file)\n";
+	# warn "Warning: binary_search returned undef (0, $size, $query, $file)\n";
 	return 0;
     }
     seek($handle, $pos, SEEK_SET)
@@ -145,6 +152,8 @@ sub ginit {
 	    }
 	    $GCache{$1} = 0 + $2;
 	});
+    } else {
+	warn "Warning: No cache file\n";
     }
     warn "ginit: gtotal = $GTotal\n";
     return $GTotal;
@@ -213,6 +222,8 @@ sub gtokenize {
 
 sub gfile {
     my ($query) = @_;
+    if (not $GTotal) { ginit(); }
+
     my @query = split(' ', $query);
     my $nword = scalar(@query);
     my $type = 'ngram';
@@ -248,8 +259,15 @@ sub gfile {
     }
     $file = sprintf("%s/%dgms/%dgm-%04d", $GDataDir, $nword, $nword, $#{$idx})
 	if not defined $file;
-    $file .= '.pair' if $type eq 'pair';
-    $file .= '.left' if $type eq 'left';
+    if ($type eq 'ngram') {
+	$file .= '.dvd7' if $nword > 3;
+    } elsif ($type eq 'pair') {
+	$file .= '.pair';
+    } elsif ($type eq 'left') {
+	$file .= '.left';
+    } else {
+	die "Unkown ngram type: [$type]\n";
+    }
     return $file;
 }
 
@@ -259,8 +277,8 @@ sub gfile {
 # words.  The first token in the sentence array should be <S>.
 
 # Supporting stuff for gbits
-my @A = (undef, undef, 5.47, 4.86, 4.8975, 4.7620);
-my @B = (undef, undef, 0.00, 0.00, 1.1752, 1.6780);
+my @A = (undef, undef, 6.7131, 5.9414, 6.5528, 5.7061);
+
 my $log2 = log(2);
 sub log2 { log($_[0])/$log2; }
 sub exp2 { exp($_[0]*$log2); }
@@ -322,7 +340,7 @@ sub gbits {
 	    $pb = $px;
 
 	} elsif ($missing_count > 0) {			# apply our smoothing formula
-	    my $extra = $A[$n] * $missing_count + exp10($B[$n]);
+	    my $extra = $A[$n] * $missing_count;
 	    $pb = ($gb + $px * ($missing_count + $extra)) 
 		/ ($ga + $extra);
 
