@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: gngram.pl,v 1.17 2007/04/10 10:12:08 dyuret Exp dyuret $} . "\n";
+warn q{$Id: gngram.pl,v 1.18 2007/04/14 10:53:42 dyuret Exp dyuret $} . "\n";
 
 use strict;
 use IO::File;
@@ -226,7 +226,7 @@ sub gfile {
 
     my @query = split(' ', $query);
     my $nword = scalar(@query);
-    my $type = 'ngram';
+    my $type = '';
 
     # Handle special query types:
     if (scalar(@query) == 3 and $query[1] =~ /^:(\d):$/) {
@@ -235,39 +235,46 @@ sub gfile {
 	die "nword=$nword out of range" unless $nword =~ /^[345]$/;
     } elsif ($query[$#query] eq ':?:') {
 	$type = 'left';
+    } elsif ($query[0] eq '_' and $query[$#query] eq '_') {
+	$type = '_x_';
+    } elsif ($query[0] eq '_') {
+	$type = '_x';
+    } elsif ($query[$#query] eq '_') {
+	$type = 'x_';
+    } elsif ($nword > 3) {
+	$type = 'dvd7';
     }
 
     if ($nword == 1) {
+	die unless $type eq '';
 	return "$GDataDir/1gms/vocab";
     } elsif ($nword !~ /^[2345]$/) {
 	die "Do not have $nword-grams";
     }
-    my $search;
-    if ($type eq 'ngram') { $search = $query; }
-    elsif ($type eq 'pair') { $search = $query[0]; }
-    elsif ($type eq 'left') { $search = $query; $search =~ s/ :\?:$//; }
+    my $search = $query;
+    if ($type eq 'pair') { 
+	$search = $query[0]; 
+    } else {
+	# ignore the wildcards for search comparison
+	$search =~ s/\s*:\?:\s*//g;
+	$search =~ s/\s*_\s*//g;
+    }
     my $idx = $GIndex[$nword];
     my $file;
     # warn "query = [$query], nword = $nword, type = $type, search = [$search]\n";
     for (my $i = 0; $i <= $#{$idx}; $i++) {
 	my $first = $idx->[$i];
-	if (($first cmp $search) > 0) {
+	if ($search lt $first) {
+	    # For file 0000 the search query can be less than the first entry:
 	    $i-- if $i > 0;
 	    $file = sprintf("%s/%dgms/%dgm-%04d", $GDataDir, $nword, $nword, $i);
 	    last;
 	}
     }
+    # For the last file the search query will not be less than the first entry:
     $file = sprintf("%s/%dgms/%dgm-%04d", $GDataDir, $nword, $nword, $#{$idx})
 	if not defined $file;
-    if ($type eq 'ngram') {
-	$file .= '.dvd7' if $nword > 3;
-    } elsif ($type eq 'pair') {
-	$file .= '.pair';
-    } elsif ($type eq 'left') {
-	$file .= '.left';
-    } else {
-	die "Unkown ngram type: [$type]\n";
-    }
+    $file .= ".$type";
     return $file;
 }
 
