@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn '$Id: model.pl,v 2.1 2007/04/10 10:11:35 dyuret Exp dyuret $' ."\n";
+warn q{$Id: model.pl,v 2.2 2007/04/10 20:07:53 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -12,20 +12,23 @@ require 'fileio.pl';
 
 my $verbose = 0;
 my $optimize = 0;
+my $patterns;			# output patterns
 my $cachefile;
 my $ngram = 5;
 my $random = 0;
 my $zeroes = 0;
-# smoothing = { linear, product, baseline }
+# smoothing = { linear, product, baseline, kn }
 my $smoothing = 'linear';
 my @A = (undef, undef, 6.3712181,  6.2403967, 6.2855943,  5.375136); # 8.06058787993131
 my @B = (undef, undef, 0.00,       0.00,      2.4973338,  2.457501); 
 my @C = (undef, undef, 0.12244049, 0.4886369, 0.74636033, 0.83561995); # 8.22092294839358
 my @D = (undef, undef, 6.7131229,  5.9414447, 6.5528203,  5.7060572); # 8.06083590891475
+my @KN = (undef, 0.01, 0.01,       0.01,      0.01,       0.01); 
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
            'optimize' => \$optimize,
+	   'patterns' => \$patterns,
            'random' => \$random,
            'zeroes' => \$zeroes,
 	   'ngram=i' => \$ngram,
@@ -46,14 +49,19 @@ GetOptions('cache=s' => \$cachefile,
  	   'd3=f' => \$D[3],
  	   'd4=f' => \$D[4],
  	   'd5=f' => \$D[5],
+	   'kn1=f' => \$KN[1],
+	   'kn2=f' => \$KN[2],
+	   'kn3=f' => \$KN[3],
+	   'kn4=f' => \$KN[4],
+	   'kn5=f' => \$KN[5],
 );
 
-my %init_fn = ('linear' => \&init_linear, 'product' => \&init_product, 'baseline' => \&init_baseline);
-my %score_fn = ('linear' => \&score_linear, 'product' => \&score_product, 'baseline' => \&score_baseline);
+my %init_fn = ('linear' => \&init_linear, 'product' => \&init_product, 'baseline' => \&init_baseline, 'kn' => \&init_kn);
+my %score_fn = ('linear' => \&score_linear, 'product' => \&score_product, 'baseline' => \&score_baseline, 'kn' => \&score_kn);
 
 # Main:
 
-my $GTotal = ginit($cachefile);
+my $GTotal = $patterns ? 1024908267229 : ginit($cachefile);
 warn "gtotal=$GTotal\n";
 my $corpus = read_corpus();
 warn "corpus=" . scalar(@$corpus) . " sentences\n";
@@ -61,6 +69,7 @@ my $nline = 0;
 my $nscore = 0;
 my $infinity = 1E9;
 my $epsilon = 1E-6;
+my %myngram;
 $optimize ? optimize() : ngram();
 
 # Subroutines:
@@ -126,6 +135,15 @@ sub init_baseline {
     return $init;
 }
 
+sub init_kn {
+    my $init;
+    my $ndims = $ngram;
+    $init = $zeroes ? zeroes($ndims) 
+	: $random ? random($ndims)
+	: pdl(@KN[1 .. $ngram]);
+    return $init;
+}
+
 sub score {
     my $x = shift;
     my ($ndims, $npoints) = $x->dims;
@@ -175,6 +193,17 @@ sub score_baseline {
     return $bits;
 }
 
+sub score_kn {			
+    my $x = shift;
+    $nscore++;
+    for (my $i = 1; $i <= $ngram; $i++) {
+	$KN[$i] = zero_one($x->at($i - 1));
+    }
+    my $bits = ngram();
+    warn "score[$nscore]: $bits $x\n";
+    return $bits;
+}
+
 sub nonnegative {
     my $x = shift;
     $x >= 0 ? $x : 0;
@@ -200,7 +229,7 @@ sub process_sentence {
     my $nbits;
     for (my $i = 1; $i < $#{$s}; $i++) {
 	$nword++;
-	if (gngram($s->[$i]) == 0) { 
+	if (myngram($s->[$i]) == 0) { 
 	    warn "Warning[$nline]: [$s->[$i]] unknown, skipping sentence.\n"
 		if not $optimize;
 	    return (0, 0);
@@ -231,9 +260,14 @@ sub read_corpus {
 
 sub bits {
     my ($s, $i, $n) = @_;
-    $n = 1 if not defined $n;
+    $n = 5 if not defined $n;
+    if ($smoothing =~ /^kn/) {
+	my $pb = kn($s, $i, $n);
+	die "Kneser-Ney returned $pb" if $pb <= 0;
+	return -log2($pb);
+    }
     if ($n == 1) {
-	my $g = gngram($s->[$i]);
+	my $g = myngram($s->[$i]);
 
 	# BUG: Any word below 200 count is excluded from the google
 	# data.  We will give such words a count of 100.  Note that
@@ -249,7 +283,7 @@ sub bits {
     }
 
     my $a = join(' ', @{$s}[($i-$n+1) .. ($i-1)]); # a = n-1 word prefix
-    my $ga = gngram($a);	# ga = count of a
+    my $ga = myngram($a);	# ga = count of a
     my $x = bits($s, $i, $n-1);	# x = lower order model bits
     if ($ga == 0) { 
 #	    warn "Warning: Zero a-count[$a]\n" 
@@ -258,9 +292,9 @@ sub bits {
     }
     my $px = exp2(-$x);		# px = lower order model probability
     my $b = $a . " $s->[$i]";	# b = all n words
-    my $gb = gngram($b);	# gb = count of b
+    my $gb = myngram($b);	# gb = count of b
     my $c = $a . " :?:";	# c = all ngrams that start with a
-    my $gc = gngram($c);	# gc = count of c
+    my $gc = myngram($c);	# gc = count of c
     my $missing_count = $ga - $gc; # missing_count = occurances of (a) 
     #   that are missing from ngram data
     my $pb;
@@ -313,6 +347,67 @@ sub bits {
 	$pb = ($gb + $px) / ($gc + 1);
     }
     return ($pb > 0 ? -log2($pb) : $infinity);
+}
+
+
+sub kn {
+    my ($s, $i, $n) = @_;
+    my ($nxy, $x, $nx, $n1x, $kn, $D);
+    $n = 5 if not defined $n;
+    if ($n < 0) {
+	die "Bad n [$n]";
+    } elsif ($n == 0) {
+	return 1/myngram('_');
+    } elsif ($n > 5) {
+	return kn($s, $i, 5);
+    } elsif ($n > $i + 1) {
+	return kn($s, $i, $i+1);
+    }    
+    $x = ($n > 1) ? join(' ', @{$s}[($i-$n+1) .. ($i-1)]).' ' : '';
+    $nx = myngram($x . ':?:');
+    if ($nx == 0) {
+	return kn($s, $i, $n-1);
+    } elsif (" $x" =~ / [;!?.] /) { # bad context
+	return kn($s, $i, $n-1);
+    }	
+    $n1x = myngram($x . '_');
+    $nxy = myngram($x . $s->[$i]);
+    $D = $KN[$n];
+    $nxy -= $D if $nxy > 0;
+    $kn = $nxy / $nx + ($n1x * $D / $nx) * kn0($s, $i, $n-1);
+    return $kn;
+}
+
+sub kn0 {
+    my ($s, $i, $n) = @_;
+    my ($x, $n1_xy, $n1_x_, $n1x_, $D, $kn0);
+    if ($n < 0) {
+	die "Bad n [$n]";
+    } elsif ($n == 0) {
+	return 1/myngram('_');
+    }
+    $x = ($n > 1) ? join(' ', @{$s}[($i-$n+1) .. ($i-1)]).' ' : '';
+    $n1_x_ = myngram('_ ' . $x . '_');
+    die "KN0 zero denominator [$x]" if $n1_x_ == 0;
+    $n1x_ = myngram($x . '_');
+    $n1_xy = myngram('_ ' . $x . $s->[$i]);
+    $D = $KN[$n];
+    $n1_xy -= $D if $n1_xy > 0;
+    $kn0 = $n1_xy / $n1_x_ + ($n1x_ * $D / $n1_x_) * kn0($s, $i, $n-1);
+    return $kn0;
+}
+
+sub myngram {
+    my $str = shift;
+    if ($patterns) {
+	if (not defined $myngram{$str}) {
+	    $myngram{$str} = 1;
+	    print "$str\n";
+	}
+	return 1;
+    } else {
+	return gngram($str);
+    }
 }
 
 
