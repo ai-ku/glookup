@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: gngram.pl,v 1.18 2007/04/14 10:53:42 dyuret Exp dyuret $} . "\n";
+warn q{$Id: gngram.pl,v 1.19 2007/04/14 11:10:25 dyuret Exp dyuret $ } . "\n";
 
 use strict;
 use IO::File;
@@ -143,9 +143,15 @@ sub ginit {
     }
     if (defined $cachefile) {
 	$GCachePath = $cachefile;
-	$GCacheHandle = new IO::File ">>$GCachePath";
-	$GCacheHandle->autoflush(1);
-	readfile($GCachePath, sub {
+	my $path = $GCachePath;
+	if ($GCachePath =~ /\.gz$/) {
+	    warn "Warning: Cache is read-only\n";
+	    $path = "zcat $path |";
+	} else {
+	    $GCacheHandle = new IO::File ">>$GCachePath";
+	    $GCacheHandle->autoflush(1);
+	}
+	readfile($path, sub {
 	    unless (/^(.+?)\t(\d+)\n$/) {
 		warn "Warning: Incomplete cache line [$_]\n";
 		return;
