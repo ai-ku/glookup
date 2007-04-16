@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 2.2 2007/04/10 20:07:53 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 2.3 2007/04/15 14:05:29 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -23,7 +23,7 @@ my @A = (undef, undef, 6.3712181,  6.2403967, 6.2855943,  5.375136); # 8.0605878
 my @B = (undef, undef, 0.00,       0.00,      2.4973338,  2.457501); 
 my @C = (undef, undef, 0.12244049, 0.4886369, 0.74636033, 0.83561995); # 8.22092294839358
 my @D = (undef, undef, 6.7131229,  5.9414447, 6.5528203,  5.7060572); # 8.06083590891475
-my @KN = (undef, 0.01, 0.01,       0.01,      0.01,       0.01); 
+my @KN = (undef, 0, 0, 0, 0, 0);
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
@@ -80,7 +80,7 @@ sub optimize {
     my $init = &{$init_fn{$smoothing}}();
     warn "initial score:\n";
     my $initscore = &{$score_fn{$smoothing}}($init);
-    my $initsize = 0.1;
+    my $initsize = 1.0;
     my $minsize = 1E-4;
     my $maxiter = 1E6;
     my ($optimum, $ssize) = simplex($init, $initsize, $minsize,
@@ -139,7 +139,7 @@ sub init_kn {
     my $init;
     my $ndims = $ngram;
     $init = $zeroes ? zeroes($ndims) 
-	: $random ? random($ndims)
+	: $random ? log(1/random($ndims)-1)
 	: pdl(@KN[1 .. $ngram]);
     return $init;
 }
@@ -197,7 +197,7 @@ sub score_kn {
     my $x = shift;
     $nscore++;
     for (my $i = 1; $i <= $ngram; $i++) {
-	$KN[$i] = zero_one($x->at($i - 1));
+	$KN[$i] = $x->at($i - 1);
     }
     my $bits = ngram();
     warn "score[$nscore]: $bits $x\n";
@@ -372,9 +372,13 @@ sub kn {
     }	
     $n1x = myngram($x . '_');
     $nxy = myngram($x . $s->[$i]);
-    $D = $KN[$n];
+    $D = 1/(1+exp(-$KN[$n]));
     $nxy -= $D if $nxy > 0;
     $kn = $nxy / $nx + ($n1x * $D / $nx) * kn0($s, $i, $n-1);
+    if ($patterns) { 
+	# if outputting patterns do the lower order models as well
+	kn($s, $i, $n-1); 
+    }
     return $kn;
 }
 
@@ -391,7 +395,7 @@ sub kn0 {
     die "KN0 zero denominator [$x]" if $n1_x_ == 0;
     $n1x_ = myngram($x . '_');
     $n1_xy = myngram('_ ' . $x . $s->[$i]);
-    $D = $KN[$n];
+    $D = 1/(1+exp(-$KN[$n]));
     $n1_xy -= $D if $n1_xy > 0;
     $kn0 = $n1_xy / $n1_x_ + ($n1x_ * $D / $n1_x_) * kn0($s, $i, $n-1);
     return $kn0;
