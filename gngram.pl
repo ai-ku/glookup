@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: gngram.pl,v 1.19 2007/04/14 11:10:25 dyuret Exp dyuret $ } . "\n";
+warn q{$Id: gngram.pl,v 1.20 2007/04/16 06:48:39 dyuret Exp dyuret $ } . "\n";
 
 use strict;
 use IO::File;
@@ -8,6 +8,8 @@ use Data::Dumper;
 require 'fileio.pl';
 
 my $GTotal;		       # total number of words from 1gms/total
+my $GMinToken = 200;
+my $GMinNgram = 40;
 my $GDataDir = '/mnt/sdc1/google-ngram'; # google data, subdirs 1gms .. 5gms
 my $GCachePath;			# file to use as cache
 my $GCacheHandle;		# file handle to append to the cache file
@@ -284,13 +286,19 @@ sub gfile {
     return $file;
 }
 
-# gbits(s,i,n): returns the number of bits according to an n-gram model
-# for the i'th word in sentence s.  n defaults to 1.  The assumption
-# is that the first order model is complete, i.e. there are no unknown
-# words.  The first token in the sentence array should be <S>.
+# gbits(s,i,n): returns the number of bits according to an n-gram
+# model for the i'th word in sentence s.  n defaults to 5.  For
+# unknown words we assume a count of 100, which is half of the minimum
+# count for google tokens.  The first token in the sentence array
+# should be <S>.
 
 # Supporting stuff for gbits
 my @A = (undef, undef, 6.7131, 5.9414, 6.5528, 5.7061);
+my @KN = ([ 21.2033786244352 ],	# n=2 9.07696754033234
+	  [ 0.88748593127696, 32.2602185715432 ], # n=3 8.2795532316515
+	  [ 0.855006567264153, 0.97130492372719, 37.9120411339679], # n=4 8.01335180811795
+	  [ 0.855738634078926, 0.955414253628614, 0.995123821721704, 39.822610737861000 ] # n=5 7.89334271419682
+	  );
 
 my $log2 = log(2);
 sub log2 { log($_[0])/$log2; }
@@ -301,76 +309,113 @@ sub exp10 { exp($_[0]*$log10); }
 
 sub gbits {
     my ($s, $i, $n) = @_;
-    $n = 1 if not defined $n;
-    if ($n == 1) {
+
+    # Handle $n = 1 and $n out of range:
+
+    $n = 5 if not defined $n;
+    if ($n <= 0) {
+	die "gbits: Bad n [$n]";
+    } elsif ($n == 1) {
 	my $g = gngram($s->[$i]);
+	if ($g == 0) {
+	    # die "Unknown word [$s->[$i]]";
 
-	# BUG: Any word below 200 count is excluded from the google
-	# data.  We will give such words a count of 100.  Note that
-	# this may happen because of tokenization errors, and it is
-	# not probabilistically sound.
-
-	# die "Unknown word [$s->[$i]]" if $g == 0;
-	$g = 100 if $g == 0;
-
-	return log2($GTotal / $g);
+	    # BUG: Any word below 200 count is excluded from the google
+	    # data.  We will give such words a count of 100.  Note that
+	    # this may happen because of tokenization errors.  It is
+	    # not probabilistically sound.
+	    $g = $GMinToken / 2;
+	}
+	return -log2($g / $GTotal);
+    } elsif ($n > 5) {
+	return gbits($s, $i, 5);
     } elsif ($n > $i + 1) {
 	return gbits($s, $i, $i+1);
-    } else {
-	my $a = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);	# a = n-1 word prefix
-	my $ga = gngram($a);				# ga = count of a
-	my $x = gbits($s, $i, $n-1);			# x = lower order model bits
-	if ($ga == 0) { 
-#	    warn "Warning: Zero a-count[$a]\n" 
-#		if $n <= 3 and $a =~ /[^\w ]/;		# check what is going on with punctuation
-	    return $x;					# return lower order result
-	}
-	my $px = exp2(-$x);				# px = lower order model probability
-	my $b = $a . " $s->[$i]";			# b = all n words
-	my $gb = gngram($b);				# gb = count of b
-	my $c = $a . " :?:";				# c = all ngrams that start with a
-	my $gc = gngram($c);				# gc = count of c
-	my $missing_count = $ga - $gc;			# missing_count = occurances of (a) 
-							#   that are missing from ngram data
-	my $pb;
-
-# If there is no missing count, surprizingly it is better to ignore
-# the context and just use the backed-off model.  This happens for
-# punctuation marks which probably have buggy counts.  For example,
-# semi-colon seems to end sentences, so there are no regular words
-# following it.  In fact the only three cases are [!], [?], [;].  I am
-# going to add [.] to the list for the same reason even though there
-# seem to be bigrams starting with [.].
-	    
-	my $bad_context = 0;
-	for my $tok (@{$s}[($i-$n+1) .. ($i-1)]) {
-	    if ($tok =~ /^[;!?.]$/) {
-		$bad_context = 1; last;
-	    }
-	}
-
-	if ($bad_context) {
-	    $pb = $px;
-
-	} elsif ($missing_count > 0) {			# apply our smoothing formula
-	    my $extra = $A[$n] * $missing_count;
-	    $pb = ($gb + $px * ($missing_count + $extra)) 
-		/ ($ga + $extra);
-
-	} elsif ($missing_count == 0) {
-#	    warn "Warning: Zero missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
-	    $pb = ($gb + $px) / ($ga + 1);
-
-	} elsif ($missing_count < 0) {
-
-# This is a bug in gngram.  This means there are more instances of
-# words following "A" than there are instances of "A" by itself.
-
-	    warn "Warning: Negative missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
-	    $pb = ($gb + $px) / ($gc + 1);
-	}
-	return -log2($pb);
     }
+
+    # See if the n-1 word context x is any good
+
+    my $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
+    my $nx = gngram($x);
+    if ($nx == 0) {
+	# BUG: instead of backing off here, we should try using the
+	# <UNK> token for unknown words in context.
+	return gbits($s, $i, $n-1);
+    } elsif (" $x " =~ / [;!?.] /) { 
+        # bad context: google data does not have any regular tokens
+	# following these four characters.
+	return gbits($s, $i, $n-1);
+    }
+
+    # Implement Kneser-Ney smoothing
+
+    my $nxy = gngram("$x $s->[$i]");
+    my $D = $KN[$n-2][$n-2];	# parameter to subtract from the nxy count
+    $nxy -= $D if $nxy > 0;	# we only subtract if it is positive
+    my $kn = $nxy / $nx;	# first approximation
+
+    # Missing count: if we add up nxy for all y, the total will be
+    # less than nx, and we will use the difference for smoothing.  The
+    # first source of the missing count is the $D we subtract for each
+    # y with nxy > 0.  The following gives us the missing count from
+    # the D subtractions:
+
+    my $n1x_ = gngram("$x _");	# number of distinct words following x
+    my $mc1 = $D * $n1x_;	# missing count from D subtractions
+
+    # Second source of the missing count is that the google data has
+    # filtered out all ngrams below the count of 40.  Thus there is a
+    # missing count between all ngrams that start with x and the count
+    # of the n-1 gram x itself:
+
+    my $nx_ = gngram("$x :?:");
+    my $mc2 = $nx - $nx_;
+
+    # Add the kn smoothing term:
+
+    $kn += (($mc1 + $mc2) / $nx) * gbits_kn($s, $i, $n-1);
+
+    return -log2($kn);
+}
+
+sub gbits_kn {
+    my ($s, $i, $n, $n0) = @_;
+
+    # s: sentence, i: position, n: ngram order, n0: original ngram
+    # order for coefficient lookup.
+    $n0 = $n + 1 if not defined $n0;
+
+    # Handle out of range $n and the $n=1 special case:
+
+    if (($n <= 0) or ($n >= 5)) {
+	die "gbits_kn: Bad n [$n]";
+    } elsif ($n == 1) {
+	my $n1_y = gngram('_ ' . $s->[$i]);
+	if ($n1_y == 0) {
+	    # Making this 1 is exactly what would happen if we smoothed with a
+	    # 0-order 1/V model.  It is not probabilistically sound.
+	    $n1_y = 1;
+	}
+	my $n1__ = gngram('_ _');
+	return $n1_y / $n1__;
+    }
+
+    my $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
+    my $n1_x_ = gngram("_ $x _");
+
+    # See if the context has non-zero count:
+    if ($n1_x_ == 0) {
+	# BUG: instead of backing off here, we should try using the
+	# <UNK> token for unknown words in context.
+	return gbits_kn($s, $i, $n-1, $n0);
+    }    
+
+    my $n1x_ = gngram("$x _");
+    my $n1_xy = gngram("_ $x $s->[$i]");
+    my $D = $KN[$n0-2][$n-2];
+    $n1_xy -= $D if $n1_xy > 0;
+    my $prob = $n1_xy / $n1_x_ + ($n1x_ * $D / $n1_x_) * gbits_kn($s, $i, $n-1, $n0);
+    return $prob;
 }
 
 1;
