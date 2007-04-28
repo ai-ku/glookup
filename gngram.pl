@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: gngram.pl,v 1.21 2007/04/27 22:05:59 dyuret Exp dyuret $ } . "\n";
+warn q{$Id: gngram.pl,v 1.22 2007/04/28 10:34:31 dyuret Exp dyuret $ } . "\n";
 
 use strict;
 use IO::File;
@@ -293,8 +293,8 @@ sub gfile {
 # should be <S>.
 
 # Supporting stuff for gbits
-my @D40 = ( undef, undef, 27.49824766425651881827, 33.85264433850251784513, 39.25016011095825056200, 39.76100851456467771813 );
-my @D1 = ( undef, undef, .85918699706260867430, .96049884243052357738, .99583849084284520795, undef );
+my @D40 = ( undef, undef, 28.11096928644257128068, 33.98733562666299928484, 39.16948427744310745367, 39.81172633310000762000 );
+my @D1 = ( undef, undef, .85948550385118495566, .96034527604501211555, .99565930386648919162, undef );
 
 my $log2 = log(2);
 sub log2 { log($_[0])/$log2; }
