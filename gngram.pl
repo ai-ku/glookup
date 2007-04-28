@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: gngram.pl,v 1.20 2007/04/16 06:48:39 dyuret Exp dyuret $ } . "\n";
+warn q{$Id: gngram.pl,v 1.21 2007/04/27 22:05:59 dyuret Exp dyuret $ } . "\n";
 
 use strict;
 use IO::File;
@@ -293,12 +293,8 @@ sub gfile {
 # should be <S>.
 
 # Supporting stuff for gbits
-my @A = (undef, undef, 6.7131, 5.9414, 6.5528, 5.7061);
-my @KN = ([ 21.2033786244352 ],	# n=2 9.07696754033234
-	  [ 0.88748593127696, 32.2602185715432 ], # n=3 8.2795532316515
-	  [ 0.855006567264153, 0.97130492372719, 37.9120411339679], # n=4 8.01335180811795
-	  [ 0.855738634078926, 0.955414253628614, 0.995123821721704, 39.822610737861000 ] # n=5 7.89334271419682
-	  );
+my @D40 = ( undef, undef, 27.49824766425651881827, 33.85264433850251784513, 39.25016011095825056200, 39.76100851456467771813 );
+my @D1 = ( undef, undef, .85918699706260867430, .96049884243052357738, .99583849084284520795, undef );
 
 my $log2 = log(2);
 sub log2 { log($_[0])/$log2; }
@@ -350,9 +346,9 @@ sub gbits {
     # Implement Kneser-Ney smoothing
 
     my $nxy = gngram("$x $s->[$i]");
-    my $D = $KN[$n-2][$n-2];	# parameter to subtract from the nxy count
+    my $D = $D40[$n];	    # parameter to subtract from the nxy count
     $nxy -= $D if $nxy > 0;	# we only subtract if it is positive
-    my $kn = $nxy / $nx;	# first approximation
+    my $p = $nxy / $nx;	# first approximation
 
     # Missing count: if we add up nxy for all y, the total will be
     # less than nx, and we will use the difference for smoothing.  The
@@ -373,17 +369,13 @@ sub gbits {
 
     # Add the kn smoothing term:
 
-    $kn += (($mc1 + $mc2) / $nx) * gbits_kn($s, $i, $n-1);
+    $p += (($mc1 + $mc2) / $nx) * gbits_kn($s, $i, $n-1);
 
-    return -log2($kn);
+    return -log2($p);
 }
 
 sub gbits_kn {
-    my ($s, $i, $n, $n0) = @_;
-
-    # s: sentence, i: position, n: ngram order, n0: original ngram
-    # order for coefficient lookup.
-    $n0 = $n + 1 if not defined $n0;
+    my ($s, $i, $n) = @_;
 
     # Handle out of range $n and the $n=1 special case:
 
@@ -407,15 +399,35 @@ sub gbits_kn {
     if ($n1_x_ == 0) {
 	# BUG: instead of backing off here, we should try using the
 	# <UNK> token for unknown words in context.
-	return gbits_kn($s, $i, $n-1, $n0);
+	return gbits_kn($s, $i, $n-1);
     }    
 
-    my $n1x_ = gngram("$x _");
+    # Implement Kneser-Ney smoothing
+
     my $n1_xy = gngram("_ $x $s->[$i]");
-    my $D = $KN[$n0-2][$n-2];
-    $n1_xy -= $D if $n1_xy > 0;
-    my $prob = $n1_xy / $n1_x_ + ($n1x_ * $D / $n1_x_) * gbits_kn($s, $i, $n-1, $n0);
-    return $prob;
+    my $D = $D1[$n];		# parameter to subtract
+    $n1_xy -= $D if $n1_xy > 0;	# only subtract if positive count
+    my $p = $n1_xy / $n1_x_;	# first approximation
+
+    # BUG: Missing count: if we add up n1_xy for all y, the total will
+    # be less than n1_x_, and we will use the difference for
+    # smoothing.  The source of the missing count is the $D we
+    # subtract for each y with n1_xy > 0.  How many such y are there?
+    # Here, we assume there are n1x_ distinct y with n1_xy > 0.  This
+    # may not be exactly correct, because of the filtering of ngrams
+    # with counts less than 40, nx_ is not equal to n_x_.  We can't
+    # use n1_x_ because that counts each axb for distinct a and b.  We
+    # need a special counter for the number of y with n1_xy > 0.  The
+    # following gives us the buggy missing count from the D
+    # subtractions:
+
+    my $n1x_ = gngram("$x _");
+    my $mc = $D * $n1x_;
+
+    # Add the kn smoothing term:
+
+    $p += ($mc / $n1_x_) * gbits_kn($s, $i, $n-1);
+    return $p;
 }
 
 1;
