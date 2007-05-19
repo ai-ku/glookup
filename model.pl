@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 2.4 2007/04/16 11:31:50 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 2.5 2007/04/27 05:13:51 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -12,6 +12,7 @@ require 'dhc.pl';
 # Command line options:
 
 my $verbose = 0;
+my $debug = 0;
 my $optimize = 0;
 my $dhc = 0;
 my $patterns;			# output patterns
@@ -25,10 +26,11 @@ my @A = (undef, undef, 6.3712181,  6.2403967, 6.2855943,  5.375136); # 8.0605878
 my @B = (undef, undef, 0.00,       0.00,      2.4973338,  2.457501); 
 my @C = (undef, undef, 0.12244049, 0.4886369, 0.74636033, 0.83561995); # 8.22092294839358
 my @D = (undef, undef, 6.7131229,  5.9414447, 6.5528203,  5.7060572); # 8.06083590891475
-my @KN = (undef, undef, 0, 0, 0, 0);
+my @KN = (0.78825346, 1.8085538, 1.7059951, 3.1911228, 3.9578511, 5.4777073, 5.1142141);
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
+           'debug' => \$debug,
            'optimize' => \$optimize,
 	   'dhc' => \$dhc,
 	   'patterns' => \$patterns,
@@ -69,7 +71,6 @@ my $corpus = read_corpus();
 warn "corpus=" . scalar(@$corpus) . " sentences\n";
 my $nline = 0;
 my $nscore = 0;
-my $debug = 0;
 my $infinity = 1E9;
 my $epsilon = 1E-6;
 my $MINNGRAM = 40;
@@ -147,10 +148,10 @@ sub init_baseline {
 
 sub init_kn {
     my $init;
-    my $ndims = $ngram - 1;
+    my $ndims = 2 * $ngram - 3;
     $init = $zeroes ? zeroes($ndims) 
 	: $random ? log(1/random($ndims)-1)
-	: pdl(@KN[2 .. $ngram]);
+	: pdl(@KN[0 .. $ndims-1]);
     return $init;
 }
 
@@ -208,8 +209,8 @@ sub score_baseline {
 sub score_kn {			
     my $x = shift;
     $nscore++;
-    for (my $i = 2; $i <= $ngram; $i++) {
-	$KN[$i] = $x->at($i - 2);
+    for (my $i = 0; $i < $x->nelem; $i++) {
+	$KN[$i] = $x->at($i);
     }
     my $bits = ngram();
     warn "score[$nscore]: $bits $x\n";
@@ -369,6 +370,7 @@ sub bits {
 sub kn {
     my ($s, $i, $n) = @_;
     my ($nxy, $x, $nx_, $n1x_, $kn, $D);
+    my ($nx, $mc);
     $n = 5 if not defined $n;
     if ($n < 0) {
 	die "Bad n [$n]";
@@ -399,9 +401,11 @@ sub kn {
 	return kn($s, $i, $i+1);
     }    
     $x = ($n > 1) ? join(' ', @{$s}[($i-$n+1) .. ($i-1)]).' ' : '';
+    $nx = myngram($x);
     $nx_ = myngram($x . ':?:');
+    $mc = $nx - $nx_;
     warn("kn($s->[$i],$i,$n): nx_ = $nx_\n") if $debug;
-    if ($nx_ == 0) {
+    if ($nx == 0) {
 	return kn($s, $i, $n-1);
     } elsif (" $x" =~ / [;!?.] /) { # bad context
 	return kn($s, $i, $n-1);
@@ -410,24 +414,17 @@ sub kn {
     warn("kn($s->[$i],$i,$n): n1x_ = $n1x_\n") if $debug;
     $nxy = myngram($x . $s->[$i]);
     warn("kn($s->[$i],$i,$n): nxy = $nxy\n") if $debug;
-    # $D = 1/(1+exp(-$KN[$n]));
-    $D = $MINNGRAM/(1+exp(-$KN[$n]));
+    $D = $MINNGRAM/(1+exp(-$KN[2*$n-4]));
     warn("kn($s->[$i],$i,$n): D = $D\n") if $debug;
     $nxy -= $D if $nxy > 0;
     #$kn = $nxy / $nx_ + ($n1x_ * $D / $nx_) * kn0($s, $i, $n-1);
 
-    # new formula:
-    my ($nx, $mc);
-    if ($n == 1) {
-	$nx = $nx_;
-	$mc = 0;
-    } else {
-	$nx = myngram($x);
-	$mc = $nx - $nx_;
-    }
     warn("kn($s->[$i],$i,$n): x = [$x] nx = $nx\n") if $debug;
     warn("kn($s->[$i],$i,$n): mc = $mc\n") if $debug;
-    $kn = $nxy / $nx + (($mc + $n1x_ * $D) / $nx) * kn0($s, $i, $n-1);
+    my $kn0 = kn0($s, $i, $n-1);
+    warn("kn($s->[$i],$i,$n): kn0 = $kn0\n") if $debug;
+
+    $kn = $nxy / $nx + (($mc + $n1x_ * $D) / $nx) * $kn0;
 
     warn("kn($s->[$i],$i,$n): kn = $kn\n") if $debug;
     if ($patterns) { 
@@ -443,6 +440,7 @@ sub kn {
 
 sub kn0 {
     my ($s, $i, $n) = @_;
+    warn("kn0($s->[$i],$i,$n): hello\n") if $debug;
     my ($x, $n1_xy, $n1_x_, $n1x_, $D, $kn0);
     if ($n < 0) {
 	die "Bad n [$n]";
@@ -452,22 +450,26 @@ sub kn0 {
     } elsif ($n == 1) {
 	my $n1_y = myngram('_ ' . $s->[$i]);
 	if ($n1_y == 0) {
-	    # warn "n1_y($s->[$i]) == 0";
+	    warn("kn0($s->[$i],$i,$n): n1_y($s->[$i]) == 0\n") if $debug;
 	    # BUG: verify that this is exactly what would happen if we smoothed with a 0-order 1/V model
 	    $n1_y = 1;
 	}
 	my $n1__ = myngram('_ _');
+	warn("kn0($s->[$i],$i,$n): n1_y=$n1_y n1__=$n1__\n") if $debug;
 	return $n1_y / $n1__;
     }
     $x = ($n > 1) ? join(' ', @{$s}[($i-$n+1) .. ($i-1)]).' ' : '';
     $n1_x_ = myngram('_ ' . $x . '_');
     warn("kn0($s->[$i],$i,$n): n1_x_ = $n1_x_\n") if $debug;
+    if ($n1_x_ == 0) {
+	return kn0($s, $i, $n-1);
+    }
     die "KN0 zero denominator [$x]" if $n1_x_ == 0;
     $n1x_ = myngram($x . '_');
     warn("kn0($s->[$i],$i,$n): n1x_ = $n1x_\n") if $debug;
     $n1_xy = myngram('_ ' . $x . $s->[$i]);
     warn("kn0($s->[$i],$i,$n): n1_xy = $n1_xy\n") if $debug;
-    $D = 1/(1+exp(-$KN[$n]));
+    $D = 1/(1+exp(-$KN[2*$n-3]));
     warn("kn0($s->[$i],$i,$n): D = $D\n") if $debug;
     $n1_xy -= $D if $n1_xy > 0;
     $kn0 = $n1_xy / $n1_x_ + ($n1x_ * $D / $n1_x_) * kn0($s, $i, $n-1);
