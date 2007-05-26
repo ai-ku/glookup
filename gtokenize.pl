@@ -1,17 +1,39 @@
 # gtokenize(): Tries to replicate the tokenization of Google ngram
-# data.  's, 'd etc. split, n't not split. intra-word dash
+# data.  Given an input string, returns an array of tokens.
+
+# Generally: 's, 'd etc. split, n't not split. intra-word dash
 # split. numbers with hyphens slashes etc. not split.
+
+# google-ngram/1gms/vocab: There are no underscore characters.
+# File encoding is UTF-8.  What other characters are there?  Running
+# chist.pl on it:
+
+# cnt=0 [_]
+# cnt=1 ["$%@[\]^{}~]
+# cnt=2 [!]	; by itself and as part of 'www.videochump!com'
+# cnt=3 [`]	; as ` and ``
+# cnt=4 [()<>]	; (, 8-(, :-(, ;-(, ), 8-), :-), ;-)
+# 		; <, >, <S>, </S>, <UNK>
 
 sub gtokenize {
     my $str = shift;
     
-    # Here is a list of all ascii punctuation:
+    # Here is a list of all 32 ascii punctuation:
     # (33-47) !"#$%&'()*+,-./ (58-64) :;<=>?@ (91-96) [\]^_` (123-126) {|}~
 
-    # The following punct characters are always split:
-    # ([?] used in urls which we ignore)
-    $str =~ s/(\S)([\!\"\$\%\(\)\<\>\?\@\[\\\]\^\_\{\|\}\~])/$1 $2/g;
-    $str =~ s/([\!\"\$\%\(\)\<\>\?\@\[\\\]\^\_\{\|\}\~])(\S)/$1 $2/g;
+    # The following 17 punct characters are always split:
+    # ([?] sometimes used in urls which we split anyway)
+    $str =~ s/(\S)([\!\"\$\%\(\)\?\@\[\\\]\^\_\{\|\}\~])/$1 $2/g;
+    $str =~ s/([\!\"\$\%\(\)\?\@\[\\\]\^\_\{\|\}\~])(\S)/$1 $2/g;
+
+    # This leaves the following 15: [#&'*+,-./:;<=>`]
+
+    # [<>] split if not part of <S>, </S>, or <UNK>
+
+    $str =~ s/<(S|\/S|UNK)>/_$1_/g;
+    $str =~ s/(\S)([<>])/$1 $2/g;
+    $str =~ s/([<>])(\S)/$1 $2/g;
+    $str =~ s/_(S|\/S|UNK)_/<$1>/g;
 
     # Backtick split if not with another backtick:
     $str =~ s/([^\`\s])(\`)/$1 $2/g;
