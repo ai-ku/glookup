@@ -1,5 +1,5 @@
 /* -*- mode: C; mode: Outline-minor; outline-regexp: "/[*][*]+"; -*- */
-const char *rcsid = "$Id: glookup.c,v 1.1 2007/06/01 10:40:32 dyuret Exp dyuret $";
+const char *rcsid = "$Id: glookup.c,v 1.2 2007/06/01 14:12:25 dyuret Exp dyuret $";
 const char *help = "glookup [-p prefix] [-a] < patterns > counts";
  
 #include <stdio.h>
@@ -11,7 +11,7 @@ const char *help = "glookup [-p prefix] [-a] < patterns > counts";
 #include "procinfo.h"
 #include "ghashx.h"
 
- 
+
 /** Command line processing */
 
 static char *prefix = ".";
@@ -93,6 +93,7 @@ typedef Token EmptyPattern[NGRAM_ORDER + 1];
 void ngram_from_string(Ngram ngm, char *str) {
   int ntok = 0;
   foreach_token(word, str) {
+    g_assert(ntok < NGRAM_ORDER);
     ngm[++ntok] = str2tok(word);
   }
   ngm[0] = ntok;
@@ -132,8 +133,9 @@ typedef struct CounterS {
  
 Counter counter_new(Pattern pat) {
   Counter cnt = g_new0(struct CounterS, 1);
-  if ((ngram_count_wildcards(pat) >= 2) &&
-      (pat[ngram_size(pat)] == WILDCARD_TOK))
+  if ((ngram_size(pat) > 2) &&
+      (pat[ngram_size(pat)] == WILDCARD_TOK) &&
+      (ngram_count_wildcards(pat) == 2))
     cnt->n2 = g_hash_table_new(g_direct_hash, g_direct_equal);
   return cnt;
 }
@@ -285,7 +287,9 @@ void mask_table_dump(Mask **mask_table) {		/* for debugging */
 #if WILD_CACHE
 
 /* This is an optimization that prevents all-wildcard patterns that
-   match every ngram from being calculated using the data */
+   match every ngram from being calculated using the data.  It doesn't
+   seem to make that much of an impact, and the code using it will be
+   obsolete if the data changes. */
 
 const guint64 n0wild[] = {0, 1024908267229, 880784659306, 732213757736, 522447038907, 362967949887};
 const guint32 n1wild[] = {0, 13588391, 314843401, 977069902, 1333820466, 1214460675};
@@ -327,14 +331,19 @@ void count_ngram(Hash patterns, Ngram ngm, guint64 ngram_cnt, Mask *masks) {
     mask_apply(masks[i], ngm, pat);
     Counter cnt = hget(patterns, pat);
     if (cnt != NULL) {
-      nmatch++;
       cnt->n0 += ngram_cnt;
-      if (ngram_count_wildcards(pat)) { 
+      int w = ngram_count_wildcards(pat);
+      if (w > 0) {
 	cnt->n1++;
+	if (cnt->n2 != NULL) {
+	  hset(cnt->n2, GUINT_TO_POINTER(ngm[n]), 1);
+	}
+	if (w < ngram_size(pat)) {
+	  nmatch = 1;
+	}
       } else {
 	nowild = 1;
       }
-      if (cnt->n2 != NULL) hset(cnt->n2, GUINT_TO_POINTER(ngm[n]), 1);
     }
   }
 
@@ -357,24 +366,27 @@ void count_ngrams(Hash patterns, Mask **pattern_masks) {
   foreach_line(fname, ngram_files) {
     g_strchomp(fname);
     g_string_printf(gstr, "|zcat %s", fname);
-    /* BUG: I don't like this hack: */
-    guint32 n = atoi(basename(fname));
-    g_assert(n >= 2 && n <= 5);
-    if (pattern_masks[n][0] == NULL) continue;
-    g_message("Reading %d-grams from [%s]", n, gstr->str);
+    g_message("Reading ngrams from [%s]", gstr->str);
+    Mask *m = NULL;
     foreach_line(str, gstr->str) {
       char *tab = strchr(str, '\t');
       g_assert(tab != NULL);
       cnt = atoll(tab+1);
       *tab = 0;
       ngram_from_string(ngm, str);
-      count_ngram(patterns, ngm, cnt, pattern_masks[n]);
+      /* This assumes a single n in each ngram file */      
+      if (m == NULL) {
+	m = pattern_masks[ngram_size(ngm)];
+	if (m[0] == NULL) break;
+      }
+      count_ngram(patterns, ngm, cnt, m);
     }
   }
   g_string_free(gstr, TRUE);
 }
 
 /** main */
+
 int main(int argc, char *argv[]) {
   g_message_init();
   g_message(rcsid);
@@ -383,7 +395,7 @@ int main(int argc, char *argv[]) {
   char *vocab_path = g_strdup_printf("|zcat %s/1gms/vocab.gz", prefix);
   g_message("Reading [%s]...", vocab_path);
   GArray *vocab_cnt = read_vocabulary(vocab_path);
-  g_message("%d words found in vocabulary, total count = %llu...", 
+  g_message("%d words found in vocabulary, total count = %" G_GUINT64_FORMAT,
 	    vocab_cnt->len - 1, g_array_index(vocab_cnt, guint64, 0));
   g_message("Reading patterns from stdin...");
   Hash patterns = read_patterns();
