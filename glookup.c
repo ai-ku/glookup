@@ -1,5 +1,5 @@
 /* -*- mode: C; mode: Outline-minor; outline-regexp: "/[*][*]+"; -*- */
-const char *rcsid = "$Id: glookup.c,v 1.2 2007/06/01 14:12:25 dyuret Exp dyuret $";
+const char *rcsid = "$Id: glookup.c,v 1.3 2007/06/01 20:41:54 dyuret Exp dyuret $";
 const char *help = "glookup [-p prefix] [-a] < patterns > counts";
  
 #include <stdio.h>
@@ -10,6 +10,30 @@ const char *help = "glookup [-p prefix] [-a] < patterns > counts";
 #include "foreach.h"
 #include "procinfo.h"
 #include "ghashx.h"
+
+/** wild_cache optimization: This doesn't seem to give us enough
+ * advantage to be worth it, it saves about 1/30 in time and maybe
+ * 1/10 in space */
+
+/* #define WILD_CACHE 1 */
+
+#if WILD_CACHE
+
+/* This is an optimization that prevents all-wildcard patterns that
+   match every ngram from being calculated using the data.  It doesn't
+   seem to make that much of an impact, and the code using it will be
+   obsolete if the data changes. */
+
+#if BUGGY_COUNT			/* I don't know how these buggy counts
+				   were obtained probably by not
+				   counting the bignums */
+const guint64 n0wild[] = {0, 1024908267229, 880784659306, 732213757736, 522447038907, 362967949887};
+#endif
+const guint64 n0wild[] = {0, 1024908267229, 910884463583, 739006848674, 528435661704, 368402367169 };
+const guint32 n1wild[] = {0, 13588391, 314843401, 977069902, 1333820466, 1214460675};
+const guint32 n2wild[] = {0, 13588391, 12880878, 9329099, 7934066, 7015505};
+
+#endif
 
 
 /** Command line processing */
@@ -31,49 +55,26 @@ void get_options(int argc, char *argv[]) {
     switch(c) {
     case 'p': prefix = optarg; break;
     case 'a': all_ngrams = 1; break;
-    default: g_error(help); break;
+    default: g_message(help); exit(0);
     }
   }
 }
  
-/** Word tokens are represented as guint32 integers.  The integer 0
- * and the string "_" represent the wildcard token. */
+/** Word tokens are represented as guint32 integers (GQuarks).  The
+ *  string "_" and its associated GQuark represent the wildcard
+ *  token. */
  
-typedef guint32 Token;
-#define WILDCARD_TOK 0
-#define WILDCARD_STR "_"
-#define str2tok(s) (strcmp((s), WILDCARD_STR) ? g_quark_from_string(s) : WILDCARD_TOK)
-#define tok2str(t) (((t) == WILDCARD_TOK) ? WILDCARD_STR : g_quark_to_string(t))
+typedef GQuark Token;
+const GQuark UNK = 0;		/* unknown words return 0 GQuark */
+static GQuark ANY;		/* GQuark corresponding to wildcard */
+#define WILDCARD_STR "_"	/* String corresponding to wildcard */
 
 
-/** read_vocabulary() reads vocab.gz, initializes the tokens
- * (represented with GQuarks), and returns the counts.  Note that this
- * code sort of depends on WILDCARD being zero and GQuarks being
- * consecutive positive numbers. */
-
-GArray *read_vocabulary(const char *path) {
-  GArray *cnt = g_array_new(FALSE, FALSE, sizeof(guint64));
-  guint64 total = 0;
-  g_array_append_val(cnt, total); /* reserved for the total count */
-  foreach_line(str, path) {
-    char *tab = strchr(str, '\t');
-    g_assert(tab != NULL);
-    guint64 n = atoll(tab+1);
-    g_assert(n > 0);
-    total += n;
-    g_array_append_val(cnt, n);
-    *tab = 0;
-    GQuark q = g_quark_from_string(str);
-    g_assert(q == cnt->len - 1);
-  }
-  g_array_index(cnt, guint64, 0) = total;
-  return cnt;
-}
- 
 /** Ngrams and related structures are represented as guint32 arrays
  * where the first element of the array gives the length.  The other
- * elements are positive integers representing tokens or zero which
- * represents a wildcard.  The three types differ only by intent of
+ * elements are non-negative integers representing tokens, special
+ * token ANY represents a wildcard and UNK represents an unknown word.
+ * The three types (Ngram, Pattern, Mask) differ only by intent of
  * usage: Ngram represents ngrams read from data, Pattern represents
  * patterns with wildcards that the user supplies, and Mask represents
  * different types of pattern determined by the position of wildcards.
@@ -94,7 +95,7 @@ void ngram_from_string(Ngram ngm, char *str) {
   int ntok = 0;
   foreach_token(word, str) {
     g_assert(ntok < NGRAM_ORDER);
-    ngm[++ntok] = str2tok(word);
+    ngm[++ntok] = g_quark_from_string(word);
   }
   ngm[0] = ntok;
 }
@@ -104,14 +105,14 @@ void ngram_to_gstring(GString *g, Ngram pat) {
   g_string_truncate(g, 0);
   foreach_tok(pi, pat) {
     if (n++) g_string_append_c(g, ' ');
-    g_string_append(g, tok2str(pi));
+    g_string_append(g, g_quark_to_string(pi));
   }
 }
 
 int ngram_count_wildcards(Ngram pat) {
   int nw = 0;
   foreach_tok(pi, pat) {
-    if (pi == WILDCARD_TOK) nw++;
+    if (pi == ANY) nw++;
   }
   return nw;
 }
@@ -133,9 +134,12 @@ typedef struct CounterS {
  
 Counter counter_new(Pattern pat) {
   Counter cnt = g_new0(struct CounterS, 1);
-  if ((ngram_size(pat) > 2) &&
-      (pat[ngram_size(pat)] == WILDCARD_TOK) &&
-      (ngram_count_wildcards(pat) == 2))
+  int nwild = ngram_count_wildcards(pat);
+  if ((nwild > 1) &&
+#if WILD_CACHE			/* do not keep n2 hash if all wild */
+      (ngram_size(pat) > nwild) &&
+#endif
+      (pat[ngram_size(pat)] == ANY))
     cnt->n2 = g_hash_table_new(g_direct_hash, g_direct_equal);
   return cnt;
 }
@@ -174,6 +178,7 @@ gboolean pattern_equal(gconstpointer a, gconstpointer b) {
 }
 
 Hash pattern_hash_init() {
+  ANY = g_quark_from_string(WILDCARD_STR);
   for (int i = 1; i <= NGRAM_ORDER; i++) {
     pattern_hash_rnd[i] = rand();
   }
@@ -186,8 +191,19 @@ void pattern_hash_print_fn(Pattern pat, Counter cnt, GString *gstr) {
   fputs(gstr->str, stdout);
   fputc('\t', stdout);
   printf("%" G_GUINT64_FORMAT, cnt->n0);
-  if (cnt->n1 > 0) printf("\t%u", cnt->n1);
-  if (cnt->n2 != NULL) printf("\t%u", hlen(cnt->n2));
+  int nwild = ngram_count_wildcards(pat);
+  if (nwild > 0) printf("\t%u", cnt->n1);
+  int n = ngram_size(pat);
+  if (pat[n] == ANY) {
+    printf("\t%u",
+	   (cnt->n2 != NULL) ? hlen(cnt->n2)
+#if WILD_CACHE
+	   : nwild == n ? n2wild[n]
+#endif
+	   : nwild == 1 ? cnt->n1
+	   : cnt->n0 == 0 ? 0
+	   : (g_message("Warning: No n2 for [%s]", gstr->str), 0));
+  }
   fputc('\n', stdout);
 }
  
@@ -195,24 +211,6 @@ void pattern_hash_print(Hash patterns) {
   GString *gstr = g_string_new(NULL);
   hmap(patterns, pattern_hash_print_fn, gstr);
   g_string_free(gstr, TRUE);
-}
-
- 
-/** read_patterns(): Reads ngram patterns from stdin and returns a
- * hash table where keys are the patterns and the values are empty
- * counters. */
-
-Hash read_patterns() {
-  EmptyPattern pat;
-  Hash patterns = pattern_hash_init();
-  foreach_line(str, NULL) {
-    ngram_from_string(pat, str);
-    if (!hgot(patterns, pat)) {
-      Counter cnt = counter_new(pat);
-      hset(patterns, ngram_copy(pat), cnt);
-    }
-  }
-  return patterns;
 }
 
  
@@ -225,7 +223,7 @@ Hash read_patterns() {
 gboolean mask_match(Mask msk, Pattern pat) {
   if (ngram_size(msk) != ngram_size(pat)) return 0;
   for (int i = ngram_size(msk); i > 0; i--) {
-    if ((pat[i] == WILDCARD_TOK) != (msk[i] == WILDCARD_TOK))
+    if ((pat[i] == ANY) != (msk[i] == ANY))
       return 0;
   }
   return 1;
@@ -235,7 +233,7 @@ void mask_apply(Mask msk, Ngram ngm, Pattern pat) {
   g_assert(ngram_size(msk) == ngram_size(ngm));
   ngram_size(pat) = ngram_size(ngm);
   for (int i = ngram_size(ngm); i > 0; i--) {
-    pat[i] = ((msk[i] == WILDCARD_TOK) ? msk[i] : ngm[i]);
+    pat[i] = ((msk[i] == ANY) ? msk[i] : ngm[i]);
   }
 }
 
@@ -247,7 +245,7 @@ void mask_table_add(Pattern pat, Counter cnt, Mask **table) {
     if (mask_match(masks[i], pat)) return;
   }
   g_assert(i < (1<<n));
-#if WILD_CACHE
+#if WILD_CACHE			/* do not create all wild mask */
   if (ngram_count_wildcards(pat) < ngram_size(pat))
 #endif
   masks[i] = ngram_copy(pat);
@@ -275,30 +273,38 @@ void mask_table_dump(Mask **mask_table) {		/* for debugging */
     Mask *m = mask_table[n];
     for (int i = 0; m[i] != NULL; i++) {
       ngram_to_gstring(g, m[i]);
-      g_message(g->str);
+      fputs(g->str, stderr);
+      fputc('\n', stderr);
     }
   }
   g_string_free(g, TRUE);
 }
   
  
-/** counting patterns */
+/** read_patterns(): Reads ngram patterns from stdin and returns a
+ * hash table where keys are the patterns and the values are empty
+ * counters. */
 
+Hash read_patterns() {
+  EmptyPattern pat;
+  Hash patterns = pattern_hash_init();
+  foreach_line(str, NULL) {
+    ngram_from_string(pat, str);
+    if (!hgot(patterns, pat)) {
+      Counter cnt = counter_new(pat);
+      hset(patterns, ngram_copy(pat), cnt);
+    }
+  }
+  return patterns;
+}
+
+ 
 #if WILD_CACHE
-
-/* This is an optimization that prevents all-wildcard patterns that
-   match every ngram from being calculated using the data.  It doesn't
-   seem to make that much of an impact, and the code using it will be
-   obsolete if the data changes. */
-
-const guint64 n0wild[] = {0, 1024908267229, 880784659306, 732213757736, 522447038907, 362967949887};
-const guint32 n1wild[] = {0, 13588391, 314843401, 977069902, 1333820466, 1214460675};
-const guint32 n2wild[] = {0, 13588391, 12880878, 9329099, 7934066, 7015505};
 
 void count_all_wildcards(Hash patterns) {
   EmptyPattern pat;
   for (int i = NGRAM_ORDER; i > 0; i--) {
-    pat[i] = WILDCARD_TOK;
+    pat[i] = ANY;
   }
   for (int i = NGRAM_ORDER; i > 0; i--) {
     ngram_size(pat) = i;
@@ -312,6 +318,36 @@ void count_all_wildcards(Hash patterns) {
 
 #endif
 
+#if 0
+
+/** read_vocabulary() reads vocab.gz, initializes the tokens
+ * (represented with GQuarks), and returns the counts.  Note that this
+ * code sort of depends on WILDCARD being zero and GQuarks being
+ * consecutive positive numbers. */
+
+GArray *read_vocabulary(const char *path) {
+  GArray *cnt = g_array_new(FALSE, FALSE, sizeof(guint64));
+  guint64 total = 0;
+  g_array_append_val(cnt, total); /* reserved for the total count */
+  foreach_line(str, path) {
+    char *tab = strchr(str, '\t');
+    g_assert(tab != NULL);
+    guint64 n = atoll(tab+1);
+    g_assert(n > 0);
+    total += n;
+    g_array_append_val(cnt, n);
+    *tab = 0;
+    GQuark q = g_quark_from_string(str);
+    g_assert(q == cnt->len - 1);
+  }
+  g_array_index(cnt, guint64, 0) = total;
+  return cnt;
+}
+ 
+#endif
+
+#if 0
+
 void count_single_word(Ngram pat, Counter cnt, GArray *vocab_cnt) {
   if (ngram_size(pat) != 1) return;
   if (pat[1] < vocab_cnt->len) {
@@ -321,31 +357,43 @@ void count_single_word(Ngram pat, Counter cnt, GArray *vocab_cnt) {
   }
 }
 
-void count_ngram(Hash patterns, Ngram ngm, guint64 ngram_cnt, Mask *masks) {
+#endif
+
+void count_ngram(Hash patterns, Ngram ngm, guint64 ngram_cnt, char *lastword, Mask *masks) {
   EmptyPattern pat;
   int n = ngram_size(ngm);
-  int nmatch = 0;
-  int nowild = 0;
+  int nmatch = 0;		/* whether this ngram matches any patterns */
+  int nowild = 0;		/* whether this ngram matches exactly */
 
   for (int i = 0; masks[i] != NULL; i++) {
     mask_apply(masks[i], ngm, pat);
     Counter cnt = hget(patterns, pat);
     if (cnt != NULL) {
       cnt->n0 += ngram_cnt;
-      int w = ngram_count_wildcards(pat);
-      if (w > 0) {
+      int nwild = ngram_count_wildcards(pat);
+      if (nwild == 0) {
+	nowild = 1;
+      } else {
 	cnt->n1++;
 	if (cnt->n2 != NULL) {
-	  hset(cnt->n2, GUINT_TO_POINTER(ngm[n]), 1);
+	  Token q = ngm[n];
+	  if (q == UNK) q = g_quark_from_string(lastword);
+	  hset(cnt->n2, GUINT_TO_POINTER(q), 1);
 	}
-	if (w < ngram_size(pat)) {
+	if (nwild < n) {
 	  nmatch = 1;
 	}
-      } else {
-	nowild = 1;
       }
     }
   }
+
+  /* if we have a match for this ngram (nmatch) and (1) the user wants
+     us to count all matching ngrams as well (all_ngrams), (2) the
+     ngram itself is not in the pattern list (!nowild), we add the
+     ngram with its count to the pattern list.  The only exception is
+     when the only pattern the ngram matched is an all wild pattern,
+     in which case the user probably did not want us to dump the whole
+     database.  The (nwild < n) condition above caters for that. */
 
   if (all_ngrams && nmatch && !nowild) {
     g_assert(hget(patterns, ngm) == NULL);
@@ -355,34 +403,47 @@ void count_ngram(Hash patterns, Ngram ngm, guint64 ngram_cnt, Mask *masks) {
   }
 }
 
+char *ngram_last_word(Ngram ngm, char *str) {
+  int ntok = 0;
+  char *lastword = NULL;
+  foreach_token(word, str) {
+    g_assert(ntok < NGRAM_ORDER);
+    ngm[++ntok] = g_quark_try_string(word);
+    lastword = word;
+  }
+  ngm[0] = ntok;
+  return lastword;
+}
+
 void count_ngrams(Hash patterns, Mask **pattern_masks) {
-  GString *gstr = g_string_new(NULL);
+  GString *ngram_file = g_string_new(NULL);
+  GString *ngram_files = g_string_new(NULL);
   EmptyPattern ngm;
   guint64 cnt;
 
-  char *ngram_files =
-    g_strdup_printf("|find %s -follow -name \"?gm-????.gz\"", prefix);
+  g_string_printf(ngram_files, "|find %s -follow -name \"?gm-????.gz\" -or -name vocab.gz", prefix);
   
-  foreach_line(fname, ngram_files) {
+  foreach_line(fname, ngram_files->str) {
     g_strchomp(fname);
-    g_string_printf(gstr, "|zcat %s", fname);
-    g_message("Reading ngrams from [%s]", gstr->str);
+    g_string_printf(ngram_file, "|zcat %s", fname);
+    g_message("Reading ngrams from [%s]", ngram_file->str);
     Mask *m = NULL;
-    foreach_line(str, gstr->str) {
+    foreach_line(str, ngram_file->str) {
       char *tab = strchr(str, '\t');
       g_assert(tab != NULL);
       cnt = atoll(tab+1);
       *tab = 0;
-      ngram_from_string(ngm, str);
-      /* This assumes a single n in each ngram file */      
+      char *lastword = ngram_last_word(ngm, str);
       if (m == NULL) {
 	m = pattern_masks[ngram_size(ngm)];
+	/* This assumes a single n in each ngram file */      
 	if (m[0] == NULL) break;
       }
-      count_ngram(patterns, ngm, cnt, m);
+      count_ngram(patterns, ngm, cnt, lastword, m);
     }
   }
-  g_string_free(gstr, TRUE);
+  g_string_free(ngram_file, TRUE);
+  g_string_free(ngram_files, TRUE);
 }
 
 /** main */
@@ -392,33 +453,47 @@ int main(int argc, char *argv[]) {
   g_message(rcsid);
   get_options(argc, argv);
   g_message("Gindex path = [%s], all_ngrams = %d", prefix, all_ngrams);
+
+  g_message("Reading patterns from stdin...");
+  Hash patterns = read_patterns();
+  g_message("Read %d patterns.", hlen(patterns));
+  g_hash_table_analyze(patterns);
+
+#if 0
   char *vocab_path = g_strdup_printf("|zcat %s/1gms/vocab.gz", prefix);
   g_message("Reading [%s]...", vocab_path);
   GArray *vocab_cnt = read_vocabulary(vocab_path);
   g_message("%d words found in vocabulary, total count = %" G_GUINT64_FORMAT,
 	    vocab_cnt->len - 1, g_array_index(vocab_cnt, guint64, 0));
-  g_message("Reading patterns from stdin...");
-  Hash patterns = read_patterns();
-  g_message("Read %d patterns.", hlen(patterns));
-  g_hash_table_analyze(patterns);
-#if WILD_CACHE
+  g_message("Counting single words...");
+  hmap(patterns, count_single_word, vocab_cnt);
   g_assert(g_array_index(vocab_cnt, guint64, 0) == n0wild[1]);
   g_assert(vocab_cnt->len == n1wild[1] + 1);
+#endif
+
+#if WILD_CACHE
   g_message("Counting all wildcards...");
   count_all_wildcards(patterns);
 #endif
-  g_message("Counting single words...");
-  hmap(patterns, count_single_word, vocab_cnt);
+
   g_message("Creating masks...");
   Mask **masks = mask_table_init(patterns);
   mask_table_dump(masks);
+
+  g_message("Counting ngrams...");
   count_ngrams(patterns, masks);
+
   g_message("Printing output...");
   pattern_hash_print(patterns);
+
   g_message("Cleaning up...");
-  free(vocab_path);
-  g_array_free(vocab_cnt, TRUE);
   free_hash(patterns); 
   mask_table_free(masks);
+
+#if 0
+  free(vocab_path);
+  g_array_free(vocab_cnt, TRUE);
+#endif
+
   return 0;
 }
