@@ -1,5 +1,5 @@
 /* -*- mode: C; mode: Outline-minor; outline-regexp: "/[*][*]+"; -*- */
-const char *rcsid = "$Id: glookup.c,v 1.4 2007/06/06 07:29:14 dyuret Exp dyuret $";
+const char *rcsid = "$Id: glookup.c,v 1.5 2007/11/21 16:47:08 dyuret Exp dyuret $";
 const char *help = "glookup [-p google-ngram-path] [-a] < patterns > counts";
 
 /** glookup.c: This program will read ngram patterns from stdin,
@@ -301,12 +301,13 @@ void mask_apply(Mask msk, Ngram ngm, Pattern pat) {
 void mask_table_add(Pattern pat, Counter cnt, Mask **table) {
   int n = ngram_size(pat);
   Mask *masks = table[n];
-  int i;
+  int mask_count = 0;
   foreach_mask(m, masks) {
     if (mask_match(m, pat)) return;
+    mask_count++;
   }
-  g_assert(i < (1<<n));
-  masks[i] = ngram_copy(pat);
+  g_assert(mask_count < (1<<n));
+  masks[mask_count] = ngram_copy(pat);
 }
 
 /* The mask_table[n] is an array of masks for patterns of length n
