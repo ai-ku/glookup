@@ -1,0 +1,136 @@
+.\" $Id: TEMPLATE.1,v 1.3 1999/10/16 23:21:57 stolcke Exp $
+.TH glookup 1 "$Date: 1999/10/16 23:21:57 $" "Web1T Tools"
+
+.SH NAME
+glookup \- reads ngram patterns with wildcards from stdin and prints
+their counts from the Web1T Google ngram data.
+
+.SH SYNOPSIS
+.B glookup
+.RB [ \-p 
+.IR google-ngram-path ] 
+.RB [ -a ] 
+.RI < " patterns " > " counts"
+
+.SH DESCRIPTION
+
+glookup reads ngram patterns (possibly containing wildcards) from
+stdin, finds their counts in one pass from google ngram data, and
+prints the results.
+
+The input should have a single pattern on each line consisting of
+space separated tokens with '_' representing the wildcard token that
+matches any word.  The output will have up to three counts (tab
+separated) next to the pattern:
+
+ n0: the total count of the ngrams matching a given pattern.
+
+ n1: the number of distinct ngrams matching a given pattern.  This is
+only output for patterns with wildcards.
+
+ n2: the number of distinct words that appear as the last word in a
+pattern that ends with a wildcard and has more than one wildcard.
+This is needed for Kneser-Ney smoothing. 
+
+For reference, here are the counts for all-wildcard patterns:
+
+                n0              n1              n2
+ _              1024908267229   13588391        -
+ _ _            910884463583    314843401       12880878
+ _ _ _          739006848674    977069902       9329099
+ _ _ _ _        528435661704    1333820466      7934066
+ _ _ _ _ _      368402367169    1214460675      7015505
+
+
+.B "Kneser-Ney Discounting Primer"
+
+KN discounting generally gives superior results and glookup has been
+written to extract all the counts necessary.  Here is a brief overview
+of interpolated KN discounting as described in Chen and Goodman 1998.
+
+\" The original KN is backed-off not interpolated.  Chen and Goodman
+\" suggest that interpolation gives better results.  The original KN uses
+\" a separate discount factor for each ngram order.  Chen and Goodman
+\" define a modified KN which uses three different discount factors for
+\" each ngram order.
+
+Let abc represent an ngram, and p(abc) the conditional probability
+of the last word (c) given the first n-1 words (ab).  We will use n0,
+n1, n2 to represent the counts defined above and '_' to represent the
+wildcard.
+
+The general form of an interpolated language model is
+
+  p(abc) = f(abc) + bow(ab) p(bc)
+
+Typically f(abc) is discounted to be less than the maximum likelihood
+estimate n0(abc)/n0(ab_) so that there is some probability mass left
+over for words never seen in the context (ab).  In Kneser-Ney,
+discounting is accomplished by subtracting a constant from the ngram
+count:
+
+  f(abc) = max(0, n0(abc)-D(abc)) / n0(ab_)
+
+The discounting constant D(abc) depends only on the order of the ngram
+abc in the original KN algorithm.  (In Chen and Goodman's modified
+version they compute different D constants for one-count, two-count,
+and three-plus count ngrams for each order.)  A good value for D(abc)
+is N1/(N1+2*N2) where N1 and N2 represent the number of ngrams in
+abc's order that occur once and twice in the training data.
+
+A backoff weight, bow(abc), is calculated to make sure the
+probabilities of all the words in the context (abc) add up to 1.  This
+can be shown to be
+
+  bow(ab) = D(abc) n1(ab_) / n0(ab_)
+
+The main idea of Kneser-Ney is to use a different estimator for the
+lower order ngrams.  Specifically, the probability of a lower order
+ngram used for backoff, p(bc), is assumed to be proportional to the
+number of unique words preceding it, n1(_bc):
+
+  p(bc)  = f(bc) + bow(b) p(c)
+  f(bc)  = max(0, n1(_bc)-D(bc)) / n1(_b_)
+  bow(b) = D(bc) n2(_b_) / n1(_b_)
+
+The probability of a unigram can be interpolated with a zero'th order
+model (1/|Vocab|), or directly taken to be proportional to the number
+of words preceding it:
+
+  p(c) = n1(_c) / n1(_ _)
+
+There are a couple of complications that stem from the incompleteness
+of Google ngram counts.  All ngrams with counts less than 40 have been
+omitted.  Thus for example we cannot use n0(ab) instead of n0(ab_), or
+n1(b_) instead of n2(_b_).  Therefore all three counts, n0, n1, and n2
+are necessary for KN discounting with Google ngrams.  Secondly, the
+discount factor formula N1/(N1+2*N2) does not work for the highest
+order because we don't know N1 or N2.  In fact the best D is
+empirically found to be close to 40 because the minimum n0 number it
+will be subtracted from is 40.  The best D for lower order ngrams can
+still be computed using the formula.
+ 
+.SH OPTIONS
+
+.TP
+.B \-\^p " google-ngram-path"
+Specify the location of the google ngram data; the default is the
+current directory.
+
+.TP
+.B \-a
+Print out the counts of the matching ngrams for each pattern; the
+default is only to print out the aggregate counts for the pattern.
+This is useful if you are trying to figure out the most likely words
+that complete a given pattern.  The printing of actual ngram counts is
+supressed for patterns that only consist of wildcards.
+
+.SH BUGS
+None whatsoever.
+
+.SH AUTHOR
+Deniz Yuret <dyuret@ku.edu.tr>.
+
+.SH "SEE ALSO"
+S. F. Chen and J. Goodman, ``An Empirical Study of Smoothing Techniques for
+Language Modeling,'' TR-10-98, Computer Science Group, Harvard Univ., 1998.
