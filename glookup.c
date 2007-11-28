@@ -1,5 +1,5 @@
 /* -*- mode: C; mode: Outline-minor; outline-regexp: "/[*][*]+"; -*- */
-const char *rcsid = "$Id: glookup.c,v 1.6 2007/11/21 16:49:23 dyuret Exp dyuret $";
+const char *rcsid = "$Id: glookup.c,v 1.7 2007/11/26 16:36:05 dyuret Exp dyuret $";
 const char *help = "glookup [-p google-ngram-path] [-a] < patterns > counts";
 
 #include <stdio.h>
@@ -301,7 +301,9 @@ void count_ngram(Hash patterns, Ngram ngm, guint64 ngram_cnt, Mask *masks) {
     if (cnt != NULL) {
       int nwild = ngram_count_wildcards(pat);
       if (nwild == 0) {
-	g_assert(cnt->n0 == 0);
+	if ((cnt->n0 != 0) && (cnt->n0 != ngram_cnt)) {
+	  g_message("Warning: Duplicate count found");
+	}
 	cnt->n0 = ngram_cnt;
 	nowild = 1;
       } else {
