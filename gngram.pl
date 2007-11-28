@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: gngram.pl,v 1.23 2007/04/28 16:02:04 dyuret Exp dyuret $ } . "\n";
+warn q{$Id: gngram.pl,v 1.24 2007/05/26 13:58:35 dyuret Exp dyuret $ } . "\n";
 
 # Set of procedures to access the plain text version of the google
 # ngram data.
@@ -60,7 +60,7 @@ sub gngram {
     die "[$query] not found in cache" if not @GIndex;
     my $file = gfile($query);
     die "gfile error" if (not defined $file);
-    # warn "file=$file\n";
+    # warn "file=[$file]\n";
     my $handle = new IO::File;
     $handle->open("< $file") or die "$file: (query=$query) $!";
     my @stat = stat $handle;
@@ -132,8 +132,9 @@ sub gread {
 # opens the cache file for appending.  Returns total count.
 
 sub ginit {
-    my ($cachefile) = @_;
+    my ($cachefile, $datapath) = @_;
     return $GTotal if $GTotal;
+    $GDataDir = $datapath if defined $datapath;
     if (-r "$GDataDir/1gms/total") {
 	readfile("$GDataDir/1gms/total", sub {
 	    $GTotal = 0 + $_;
@@ -227,7 +228,7 @@ sub gfile {
     # For the last file the search query will not be less than the first entry:
     $file = sprintf("%s/%dgms/%dgm-%04d", $GDataDir, $nword, $nword, $#{$idx})
 	if not defined $file;
-    $file .= ".$type";
+    $file .= ".$type" if $type;
     return $file;
 }
 
