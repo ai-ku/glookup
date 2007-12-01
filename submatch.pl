@@ -1,4 +1,4 @@
-warn q{$Id: submatch.pl,v 1.4 2007/12/01 11:18:56 dyuret Exp dyuret $ }."\n";
+warn q{$Id: submatch.pl,v 1.5 2007/12/01 11:56:23 dyuret Exp dyuret $ }."\n";
 
 # submatch($head, $word, [$pos]): finds the versions of the word that
 # matches the head in terms of capitalization and morphology.
@@ -10,6 +10,7 @@ warn q{$Id: submatch.pl,v 1.4 2007/12/01 11:18:56 dyuret Exp dyuret $ }."\n";
 use strict;
 require 'celex.pl';
 
+my $debug = 0;
 my %celexpos;			# celex pos numbers
 my %wfids;			# wordform ids for a string
 my @wfpos;			# wordform part of speech
@@ -63,11 +64,11 @@ sub mormatch {
     my $headids = $wfids{lc($head)};
     my $wordids = $wfids{lc($word)};
     if (not defined $headids) {
-	warn "Warning: [$head] not found in celex\n";
+	warn "Warning: [$head] not found in celex\n" if $debug;
 	return ($word);
     }
     if (not defined $wordids) {
-	warn "Warning: [$word] not found in celex\n";
+	warn "Warning: [$word] not found in celex\n" if $debug;
 	return ($word);
     }
 
@@ -77,13 +78,13 @@ sub mormatch {
 	my $cpos = $celexpos{$pos};
 	my @headids = grep { $wfpos[$_] eq $cpos } @$headids;
 	if (not @headids) {
-	    warn "Warning: [$head] not found with pos [$pos] in celex\n";
+	    warn "Warning: [$head] not found with pos [$pos] in celex\n" if $debug;
 	    return ($word);
 	}
 	$headids = \@headids;
 	my @wordids = grep { $wfpos[$_] eq $cpos } @$wordids;
 	if (not @wordids) {
-	    warn "Warning: [$word] not found with pos [$pos] in celex\n";
+	    warn "Warning: [$word] not found with pos [$pos] in celex\n" if $debug;
 	    return ($word);
 	}
 	$wordids = \@wordids;
@@ -114,7 +115,7 @@ sub mormatch {
     if (%answer) {
 	return keys %answer;
     } else {
-	warn "Warning: no wordforms found for [$word] that match [$head] in celex\n";
+	warn "Warning: no wordforms found for [$word] that match [$head] in celex\n" if $debug;
 	return ($word);
     }
 }
