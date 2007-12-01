@@ -1,12 +1,22 @@
-warn '$Id: submatch.pl,v 1.2 2007/03/27 10:25:26 dyuret Exp dyuret $' . "\n";
+warn q{$Id: submatch.pl,v 1.3 2007/03/29 13:44:36 dyuret Exp dyuret $ }."\n";
 
 # submatch($head, $word, [$pos]): finds the versions of the word that
 # matches the head in terms of capitalization and morphology.
 # Optional pos argument restricts which parts of speech to consider,
-# should be one of 'n', 'v', or 'a'.
+# should be one of 'n', 'v', 'a', 'r'.  If not specified, all parts of
+# speech will be considered.  Head and word may be multiword phrases,
+# in which case the words should be separated by spaces.
 
-my %emw;
-my %var = ('n' => 2, 'v' => 5, 'a' => 3);
+use strict;
+require 'celex.pl';
+
+my %celexpos;			# celex pos numbers
+my %wfids;			# wordform ids for a string
+my @wfpos;			# wordform part of speech
+my @wfmor;			# wordform inflection type
+my @wflm;			# wordform lemma id
+my @lmwfs;			# wordform ids for lemma
+my @wfstrs;			# wordform strings
 
 # print join(' ', submatch(@ARGV)) . "\n";
 
@@ -25,35 +35,64 @@ sub submatch {
 
 sub mormatch {
     my ($head, $word, $pos) = @_;
-    return ($word) unless (defined $pos and defined $var{$pos});
-    if (not %emw) {
-	open(FP, 'emw.dat') or return ($word);
-	while(<FP>) {
-	    my @a = split /[\t\n]/;
-	    for my $w (@a) {
-		push @{$emw{$w}}, \@a;
-	    }
-	}
-	close(FP);
+
+    # Find celex wordforms for head and word
+    mormatch_init() if not %wfids;
+    my $headids = $wfids{lc($head)};
+    my $wordids = $wfids{lc($word)};
+    if (not defined $headids) {
+	warn "Warning: [$head] not found in celex\n";
+	return ($word);
     }
-    my $lchead = lc($head);
-    my $lcword = lc($word);
-    return ($word) unless (defined $emw{$lchead} and defined $emw{$lcword});
+    if (not defined $wordids) {
+	warn "Warning: [$word] not found in celex\n";
+	return ($word);
+    }
+
+    # Filter the wordforms for pos if given
+    if (defined $pos) {
+	die "Unknown pos character [$pos]" if not defined $celexpos{$pos};
+	my $cpos = $celexpos{$pos};
+	my @headids = grep { $wfpos[$_] eq $cpos } @$headids;
+	if (not @headids) {
+	    warn "Warning: [$head] not found with pos [$pos] in celex\n";
+	    return ($word);
+	}
+	$headids = \@headids;
+	my @wordids = grep { $wfpos[$_] eq $cpos } @$wordids;
+	if (not @wordids) {
+	    warn "Warning: [$word] not found with pos [$pos] in celex\n";
+	    return ($word);
+	}
+	$wordids = \@wordids;
+    }
+
+    # Output matching forms for word
     my %answer;
-    for my $a (@{$emw{$lchead}}) {
-	my $n = scalar(@$a);
-	next if defined $pos and $n != $var{$pos};
-	for (my $i = 0; $i <= $#{$a}; $i++) {
-	    next unless $a->[$i] eq $lchead;
-	    for my $b (@{$emw{$lcword}}) {
-		next unless $n == scalar(@$b); # wrong pos
-		$answer{$b->[$i]} = 1;
+    for my $hid (@$headids) {
+	my $hpos = $wfpos[$hid];
+	my $hmor = $wfmor[$hid];
+	
+	for my $wid (@$wordids) {
+	    my $wpos = $wfpos[$wid];
+	    next if $wpos ne $hpos;
+	    my $lemma = $wflm[$wid];
+	    
+	    for my $xid (@{$lmwfs[$lemma]}) {
+		my $xmor = $wfmor[$xid];
+		if ($xmor eq $hmor) {
+		    for my $str (@{$wfstrs[$xid]}) {
+			$answer{$str}++;
+		    }
+		}
 	    }
 	}
     }
+
     if (%answer) {
 	return keys %answer;
     } else {
+	warn "Warning: no wordforms found for [$word] that match [$head] in celex\n";
 	return ($word);
     }
 }
@@ -69,6 +108,26 @@ sub capmatch {
     } else {
 	return $word;
     }
+}
+
+sub mormatch_init {
+    %celexpos = ('n' => 1, 'a' => 2, 'v' => 4, 'r' => 7);
+    my @lmpos; readCelexFiles('esl', sub { $lmpos[$_[0]] = $_[3]; });
+
+    readCelexFiles('emw', sub { 
+	$wflm[$_[0]] = $_[3]; 
+	$wfmor[$_[0]] = $_[4]; 
+	$wfpos[$_[0]] = $lmpos[$_[3]];
+	push @{$lmwfs[$_[3]]}, $_[0];
+    });
+    readCelexFiles('eow', sub {
+	my $id = $_[0];
+	for (my $i = 8; $i <= $#_; $i += 5) {
+	    my $str = lc(StripDia(StripSyl($_[$i])));
+	    push @{$wfstrs[$id]}, $str;
+	    push @{$wfids{$str}}, $id;
+	}
+    });
 }
 
 1;
