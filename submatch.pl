@@ -1,4 +1,4 @@
-warn q{$Id: submatch.pl,v 1.3 2007/03/29 13:44:36 dyuret Exp dyuret $ }."\n";
+warn q{$Id: submatch.pl,v 1.4 2007/12/01 11:18:56 dyuret Exp dyuret $ }."\n";
 
 # submatch($head, $word, [$pos]): finds the versions of the word that
 # matches the head in terms of capitalization and morphology.
@@ -21,16 +21,38 @@ my @wfstrs;			# wordform strings
 # print join(' ', submatch(@ARGV)) . "\n";
 
 sub submatch {
-    my ($head, $word, $pos) = @_;
+    my ($h0, $w0, $pos) = @_;
+    my $head = headword($h0, $pos);
+    my $word = headword($w0, $pos);
     my @wlst1 = mormatch($head, $word, $pos);
 #    warn join('/', 'mormatch', @_, '=>', @wlst1) . "\n";
+    
+    for (@wlst1) {
+	my $x = $w0;
+	$x =~ s/$word/$_/;
+	$_ = $x;
+    }
+
     my %wlst2 = ();
     for my $w (@wlst1) {
-	my $wcap = capmatch($head, $w);
+	my $wcap = capmatch($h0, $w);
 	$wlst2{$wcap} = 1;
     }
 #    warn join('/', 'submatch', @_, '=>', keys %wlst2) . "\n";
+
     return keys %wlst2;
+}
+
+sub headword {
+    my ($phrase, $pos) = @_;
+    my @p = split(/\s+/, $phrase);
+    if (@p == 1) {
+	return $phrase;
+    } elsif ($pos eq 'n' and $p[1] ne 'of') {
+	return $p[$#p];
+    } else {
+	return $p[0];
+    }
 }
 
 sub mormatch {
@@ -99,12 +121,12 @@ sub mormatch {
 
 sub capmatch {
     my ($head, $word) = @_;
-    if ($head =~ /^[a-z\W]+$/) {
+    if ($head eq lc($head)) {
 	return lc($word);
-    } elsif ($head =~ /^[A-Z][a-z\W]*$/) {
-	return ucfirst($word);
-    } elsif ($head =~ /^[A-Z\W]+$/) {
+    } elsif ($head eq uc($head) and $head =~ /[A-Z].*[A-Z]/) {
 	return uc($word);
+    } elsif ($head =~ /^[A-Z]/) {
+	return join(' ', map { ucfirst } split(/\s+/, $word));
     } else {
 	return $word;
     }
