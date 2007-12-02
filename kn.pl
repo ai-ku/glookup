@@ -1,15 +1,18 @@
 #!/usr/bin/perl -w
 use strict;
-warn q{$Id$ }."\n";
+warn q{$Id: kn.pl,v 1.2 2007/12/02 09:30:07 dyuret Exp dyuret $ }."\n";
 
-# kn(s,i,n): returns the number of bits according to an n-gram model
-# for the i'th word in sentence s.  n defaults to 5.  For unknown
-# words we assume a count of 100, which is half of the minimum count
-# for google tokens.  The first token in the sentence array should be
-# <S>.  The model needs to be initialized (kn_init) with a file of
-# counts before use.  If this is not performed, then the program
-# simply writes out the patterns that would be needed for its
-# computation into the hash %main::kn_patterns
+# kn(s,i,n): returns the probability of the i'th word in sentence s
+# according to an n-gram model.  n defaults to 5.  The first token in
+# the sentence array should be <S>.  The model needs to be initialized
+# (kn_init) with a file of counts before use.  If this is not
+# performed, then the program simply writes out the patterns that
+# would be needed for its computation into the hash %main::kn_patterns
+
+# BUG: For unknown words we assume a count of 100, which is half of
+# the minimum count for google tokens.
+# Change this: unknown words should return 0 probability, the caller
+# should handle them, replacing with <UNK> if necessary.
 
 # The program uses three types of counts:
 # n0: is the total count of the ngrams matching a given pattern
@@ -18,6 +21,35 @@ warn q{$Id$ }."\n";
 # side of a pattern in the form of "x _".  X itself may have
 # wildcards; this is needed for kn smoothing.
 
+
+# The format of the file that kn_init uses to initalize should have
+# the following tab separated fields:
+
+# PATTERN <tab> N0 [<tab> N1 [<tab> N2]]
+
+# The pattern is an ngram string, tokens separated by spaces, possibly
+# some wildcards.  N0 always exists, N1 only exists if the pattern
+# contains a wildcard, and N2 only exists if the pattern has more than
+# one wildcard with one at the end.  N1 or N2 may be missing if N0==0.
+
+sub kn_init {
+    my $path = shift;
+    $DEBUG = shift;
+    undef $main::kn_patterns;
+    return if not defined $path;
+    open(FP, $path) or die $!;
+    while(<FP>) {
+	chomp;
+	my ($pat, $n0, $n1, $n2) = split(/\t/);
+	die if not defined $pat;
+	die if not defined $n0;
+	$kn0{$pat} = $n0;
+	$kn1{$pat} = $n1 if defined $n1;
+	$kn2{$pat} = $n2 if defined $n2;
+	print STDERR '.' unless $. % 100000;
+    }
+    close(FP);
+}
 
 # The following parameters have been optimized on the Brown corpus:
 
@@ -30,33 +62,6 @@ my $DEBUG = 0;
 my %kn0;
 my %kn1;
 my %kn2;
-
-# The format of the file that kn_init uses to initalize should have
-# the following tab separated fields:
-
-# PATTERN <tab> N0 [<tab> N1 [<tab> N2]]
-
-# The pattern is an ngram string, tokens separated by spaces, possibly
-# some wildcards.  N0 always exists, N1 only exists if the pattern
-# contains a wildcard, and N2 only exists if the pattern has a
-# wildcard at the end.  N1 or N2 may be missing if N0==0.
-
-sub kn_init {
-    my $path = shift;
-    $DEBUG = shift;
-    undef $main::kn_patterns;
-    return if not defined $path;
-    open(FP, $path) or die $!;
-    while(<FP>) {
-	chomp;
-	my ($pat, $n0, $n1, $n2) = split(/\t/);
-	$kn0{$pat} = $n0;
-	$kn1{$pat} = $n1 if defined $n1;
-	$kn2{$pat} = $n2 if defined $n2;
-	print STDERR '.' unless $. % 100000;
-    }
-    close(FP);
-}
 
 sub kn {
     my ($s, $i, $n) = @_;
@@ -72,7 +77,7 @@ sub kn {
 
     } elsif ($s->[$i] eq $ANY) {
 	# The probability of seeing any word in position i is 1
-	return 0;
+	return 1;
 
     } elsif ($n > $NGRAM) {
 	return kn($s, $i, $NGRAM);
@@ -149,7 +154,7 @@ sub kn {
     }
 
     warn "kn[$n]=$p\n" if $DEBUG;
-    return -log($p)/log(2);
+    return $p;
 }
 
 sub kn_loop {
