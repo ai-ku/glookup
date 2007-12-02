@@ -1,6 +1,7 @@
 #!/usr/bin/perl -w
 use strict;
-warn q{$Id: kn.pl,v 1.2 2007/12/02 09:30:07 dyuret Exp dyuret $ }."\n";
+warn q{$Id: kn.pl,v 1.3 2007/12/02 09:45:48 dyuret Exp dyuret $ }."\n";
+my $DEBUG = 0;
 
 # kn(s,i,n): returns the probability of the i'th word in sentence s
 # according to an n-gram model.  n defaults to 5.  The first token in
@@ -21,6 +22,9 @@ warn q{$Id: kn.pl,v 1.2 2007/12/02 09:30:07 dyuret Exp dyuret $ }."\n";
 # side of a pattern in the form of "x _".  X itself may have
 # wildcards; this is needed for kn smoothing.
 
+my %kn0;
+my %kn1;
+my %kn2;
 
 # The format of the file that kn_init uses to initalize should have
 # the following tab separated fields:
@@ -58,10 +62,6 @@ my @D1 = ( undef, undef, .85948550385118495566, .96034527604501211555, .99565930
 
 my $ANY = '_';
 my $NGRAM = 5;
-my $DEBUG = 0;
-my %kn0;
-my %kn1;
-my %kn2;
 
 sub kn {
     my ($s, $i, $n) = @_;
@@ -266,6 +266,39 @@ sub kn2 {
     } else {
 	die "Error: n0 for pattern not found [$pat]";
     }
+}
+
+use Data::Dumper;
+require "gtokenize.pl";
+
+sub kn_test {
+    my ($path, $ngram) = @_;
+    $ngram = $NGRAM if not defined $ngram;
+    my %cnt;
+
+    # We assume a plain text file with one sentence per line
+    open(FP, $path) or die $!;
+    while(<FP>) {
+	next unless /\S/;
+	$cnt{sentences}++;
+	my @s = ('<S>', gtokenize($_), '</S>');
+	for (my $i = 1; $i <= $#s; $i++) {
+	    $cnt{words}++;
+	    print $s[$i];
+	    print '?' if kn0($s[$i]) == 0;
+ 	    for (my $n = 1; $n < $ngram; $n++) {
+		my $p =  kn(\@s, $i, $n);
+		my $b = log($p)/log(2);
+ 		printf "\t%.4f", $b;
+ 	    }
+	    my $p = kn(\@s, $i, $ngram);
+	    my $b = log($p)/log(2);
+	    $cnt{bits} += $b;
+	    printf "\t%.4f\n", $b;
+	}
+    }
+    close(FP);
+    warn Dumper(\%cnt);
 }
 
 1;
