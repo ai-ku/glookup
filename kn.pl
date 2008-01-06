@@ -1,7 +1,13 @@
 #!/usr/bin/perl -w
 use strict;
-warn q{$Id: kn.pl,v 1.3 2007/12/02 09:45:48 dyuret Exp dyuret $ }."\n";
+warn q{$Id: kn.pl,v 1.4 2007/12/02 10:37:48 dyuret Exp dyuret $ }."\n";
 my $DEBUG = 0;
+
+# TODO:
+# - test using backoff vs regular counts when context has zero count
+# - do something better about oov words
+# - test the kn discount coefficient estimates given in paper
+# - test using n0x vs n0x_
 
 # kn(s,i,n): returns the probability of the i'th word in sentence s
 # according to an n-gram model.  n defaults to 5.  The first token in
@@ -109,55 +115,69 @@ sub kn {
 	# See if the n-1 word context x is any good
 
 	my $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
-	my $nx = kn0($x);
-	if ($nx == 0) {
+	my $n0x_ = kn0("$x _");
+	if (($n0x_ == 0)
+	    # Backoff when context count is zero
 	    # BUG: instead of backing off here, we should try using the
 	    # <UNK> token for unknown words in context.
-	    return kn($s, $i, $n-1);
-	} elsif (" $x " =~ / [;!?.] /) { 
+	    or ((" $x " =~ / [;!?.] /) and
+		not ($x =~ /^[^;!?.]*[;!?.]$/ and $s->[$i] eq '</S>'))
 	    # bad context: google data does not have any regular tokens
 	    # following these four characters.
-	    return kn($s, $i, $n-1);
+	    or (not %kn0)
+	    # If kn_init has not been called we do not know if we need
+	    # to backoff or not, so we might as well do every order.
+	    ) {
+
+	    # This is my original implementation, use the unmodified
+	    # counts when backing off because of a zero context.
+	    $p = kn($s, $i, $n-1); 
+
+	    # This is the srilm implementation, always use the
+	    # modified context when backing off.
+	    # my $p = kn_backoff($s, $i, $n-1); 
+
+	    return $p if %kn0;
 	}
 
 	# First approximation
 
-	my $nxy = kn0("$x $s->[$i]");
-	warn "kn[$n][0]=$nxy/$nx=" .($nxy/$nx)."\n" if $DEBUG;
-	my $D = $D40[$n];   # parameter to subtract from the nxy count
-	$nxy -= $D if $nxy > 0;	# we only subtract if it is positive
-	$p = $nxy / $nx;	# first approximation
-	warn "kn[$n][1]=($nxy-$D)/$nx=$p\n" if $DEBUG;
+	my $n0xy = kn0("$x $s->[$i]");
+	warn "kn[$n][0]=$n0xy/$n0x_=" .($n0xy/$n0x_)."\n" if $DEBUG;
+	my $D = $D40[$n];   # parameter to subtract from the n0xy count
+	$n0xy -= $D if $n0xy > 0;	# we only subtract if it is positive
+	$p = $n0xy / $n0x_;	# first approximation
+	warn "kn[$n][1]=($n0xy-$D)/$n0x_=$p\n" if $DEBUG;
 
 	# Implement Kneser-Ney smoothing
 
-	# Missing count: if we add up nxy for all y, the total will be
-	# less than nx, and we will use the difference for smoothing.  The
-	# first source of the missing count is the $D we subtract for each
-	# y with nxy > 0.  The following gives us the missing count from
-	# the D subtractions:
+	# Missing count: The source of the missing count is the $D we
+	# subtract for each y with n0xy > 0.  The following gives us
+	# the missing count from the D subtractions:
 
-	my $n2x_ = kn2("$x $ANY"); # number of distinct words following x
-	my $mc1 = $D * $n2x_;	# missing count from D subtractions
+	my $n1x_ = kn1("$x $ANY"); # number of distinct words following x
+	my $mc1 = $D * $n1x_;	# missing count from D subtractions
 
+	# DEPRECATED:
+	# By using n0x_ instead of n0x we do not need mc2 any more.
+	#
 	# Second source of the missing count is that the google data has
 	# filtered out all ngrams below the count of 40.  Thus there is a
 	# missing count between all ngrams that start with x and the count
 	# of the n-1 gram x itself:
-
-	my $nx_ = kn0("$x $ANY");
-	my $mc2 = $nx - $nx_;
+	# my $nx_ = kn0("$x $ANY");
+	# my $mc2 = $nx - $nx_;
 
 	# Add the kn smoothing term:
 
-	$p += (($mc1 + $mc2) / $nx) * kn_loop($s, $i, $n-1);
+	$p += ($mc1 / $n0x_) * kn_backoff($s, $i, $n-1);
     }
 
     warn "kn[$n]=$p\n" if $DEBUG;
     return $p;
 }
 
-sub kn_loop {
+sub kn_backoff {
     my ($s, $i, $n) = @_;
     my $p;
 
@@ -180,7 +200,7 @@ sub kn_loop {
 	if ($n1_x_ == 0) {
 	    # BUG: instead of backing off here, we should try using the
 	    # <UNK> token for unknown words in context.
-	    return kn_loop($s, $i, $n-1);
+	    return kn_backoff($s, $i, $n-1);
 	}    
 
 	# First approximation
@@ -189,34 +209,36 @@ sub kn_loop {
 	my $D = $D1[$n];	# parameter to subtract
 	$n1_xy -= $D if $n1_xy > 0; # only subtract if positive count
 	$p = $n1_xy / $n1_x_;	# first approximation
-	warn "kn_loop[$n][0]=$n1_xy/$n1_x_=$p\n" if $DEBUG;
+	warn "kn_backoff[$n][0]=$n1_xy/$n1_x_=$p\n" if $DEBUG;
 
 	# Implement Kneser-Ney smoothing
 
-	# Missing count: if we add up n1_xy for all y, the total will be
-	# less than n1_x_, and we will use the difference for smoothing.
-	# The source of the missing count is the $D we subtract for each y
-	# with n1_xy > 0.  How many such y are there?  We can't use n1x_,
-	# because of the filtering of ngrams with counts less than 40, nx_
-	# is not equal to n_x_.  We can't use n1_x_ because that counts
-	# each axb for distinct a and b.  We need a special counter for
-	# the number of y with n1_xy > 0.  That is the n2_x_ count.
+	# Missing count: if we add up n1_xy for all y, the total will
+	# be less than n1_x_, and we will use the difference for
+	# smoothing.  The source of the missing count is the $D we
+	# subtract for each y with n1_xy > 0.  How many such y are
+	# there?  We can't use n1x_, because of the filtering of
+	# ngrams with counts less than 40, n1x_ is not equal to n2_x_.
+	# We can't use n1_x_ because that counts each axb for distinct
+	# a and b.  We need a special counter for the number of y with
+	# n1_xy > 0.  That is the n2_x_ count.
 
 	my $n2_x_ = kn2("$ANY $x $ANY");
 	my $mc = $D * $n2_x_;
 
 	# Add the kn smoothing term:
 
-	$p += ($mc / $n1_x_) * kn_loop($s, $i, $n-1);
+	$p += ($mc / $n1_x_) * kn_backoff($s, $i, $n-1);
     }
-    warn "kn_loop[$n]=$p\n" if $DEBUG;
+    warn "kn_backoff[$n]=$p\n" if $DEBUG;
     return $p;
 }
 
 sub kn0 {
     my $pat = shift;
     if (not %kn0) {
-	$main::kn_patterns{$pat} = 1;
+	print "$pat\n" unless $main::kn_patterns{$pat}++;
+	return 1;
     } elsif (defined $kn0{$pat}) {
 	return $kn0{$pat};
     } else {
@@ -227,7 +249,8 @@ sub kn0 {
 sub kn1 {
     my $pat = shift;
     if (not %kn0) {
-	$main::kn_patterns{$pat} = 1;
+	print "$pat\n" unless $main::kn_patterns{$pat}++;
+	return 1;
     } elsif (defined $kn1{$pat}) {
 	return $kn1{$pat};
     } elsif (defined $kn0{$pat}) {
@@ -246,7 +269,8 @@ sub kn1 {
 sub kn2 {
     my $pat = shift;
     if (not %kn0) {
-	$main::kn_patterns{$pat} = 1;
+	print "$pat\n" unless $main::kn_patterns{$pat}++;
+	return 1;
     } elsif (defined $kn2{$pat}) {
 	return $kn2{$pat};
     } elsif ($pat !~ /^.*_$/) {
@@ -284,20 +308,23 @@ sub kn_test {
 	my @s = ('<S>', gtokenize($_), '</S>');
 	for (my $i = 1; $i <= $#s; $i++) {
 	    $cnt{words}++;
-	    print $s[$i];
-	    print '?' if kn0($s[$i]) == 0;
+	    print $s[$i] if %kn0;
+	    print '?' if %kn0 and kn0($s[$i]) == 0;
  	    for (my $n = 1; $n < $ngram; $n++) {
 		my $p =  kn(\@s, $i, $n);
-		my $b = log($p)/log(2);
- 		printf "\t%.4f", $b;
+		my $b = -log($p)/log(2);
+ 		printf "\t%.4f", $b if %kn0;
  	    }
 	    my $p = kn(\@s, $i, $ngram);
-	    my $b = log($p)/log(2);
+	    my $b = -log($p)/log(2);
 	    $cnt{bits} += $b;
-	    printf "\t%.4f\n", $b;
+	    printf "\t%.4f\n", $b if %kn0;
 	}
     }
     close(FP);
+    if (not %kn0) {
+	print "$_\n" for keys %main::kn_patterns;
+    }
     warn Dumper(\%cnt);
 }
 
