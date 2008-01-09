@@ -28,7 +28,7 @@
  * MT safe
  */
 
-#include "config.h"
+/* #include "config.h" */
 
 #include "glib.h"
 
@@ -69,6 +69,18 @@ static const guint g_primes[] =
   6153409,
   9230113,
   13845163,
+  20767739,
+  31151609,
+  46727399,
+  70091083,
+  105136607,
+  157704889,
+  236557333,
+  354835993,
+  532253989,
+  798380983,
+  1197571423,
+  1796357117,
 };
 
 static const guint g_nprimes = sizeof (g_primes) / sizeof (g_primes[0]);
