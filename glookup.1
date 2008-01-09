@@ -1,5 +1,5 @@
-.\" $Id: glookup.1,v 1.1 2007/11/26 16:18:29 dyuret Exp dyuret $
-.TH glookup 1 "$Date: 2007/11/26 16:18:29 $" "Web1T Tools"
+.\" $Id: glookup.1,v 1.2 2007/11/26 16:36:17 dyuret Exp dyuret $
+.TH glookup 1 "$Date: 2007/11/26 16:36:17 $" "Web1T Tools"
 
 .SH NAME
 glookup \- reads ngram patterns with wildcards from stdin and prints
@@ -10,18 +10,20 @@ their counts from the Web1T Google ngram data.
 .RB [ \-p 
 .IR google-ngram-path ] 
 .RB [ -a ] 
+.RB [ -2 ]
 .RI < " patterns " > " counts"
 
 .SH DESCRIPTION
 
 glookup reads ngram patterns (possibly containing wildcards) from
 stdin, finds their counts in one pass from google ngram data, and
-prints the results.
+prints the results to stdout.
 
 The input should have a single pattern on each line consisting of
 space separated tokens with '_' representing the wildcard token that
 matches any word.  The output will have up to three counts (tab
-separated) next to the pattern:
+separated) next to each pattern.  Patterns with zero counts will not
+be output.
 
  n0: the total count of the ngrams matching a given pattern.
 
@@ -29,8 +31,8 @@ separated) next to the pattern:
 only output for patterns with wildcards.
 
  n2: the number of distinct words that appear as the last word in a
-pattern that ends with a wildcard and has more than one wildcard.
-This is needed for Kneser-Ney smoothing. 
+pattern.  This is output for patterns that have more than one wildcard
+and end with a wildcard.  This is needed for Kneser-Ney smoothing.
 
 For reference, here are the counts for all-wildcard patterns:
 
@@ -118,6 +120,11 @@ default is only to print out the aggregate counts for the pattern.
 This is useful if you are trying to figure out the most likely words
 that complete a given pattern.  The printing of actual ngram counts is
 supressed for patterns that only consist of wildcards.
+
+.TP
+.B \-2
+Turn off the counting and printing of n2.  This saves some memory when
+the n2 counts are not needed.
 
 .SH BUGS
 None whatsoever.
