@@ -1,6 +1,6 @@
 /* -*- mode: C; mode: Outline-minor; outline-regexp: "/[*][*]+"; -*- */
-const char *rcsid = "$Id: glookup.c,v 1.7 2007/11/26 16:36:05 dyuret Exp dyuret $";
-const char *help = "glookup [-p google-ngram-path] [-a] < patterns > counts";
+const char *rcsid = "$Id: glookup.c,v 1.8 2007/11/28 15:41:56 dyuret Exp dyuret $";
+const char *help = "glookup [-p google-ngram-path] [-a] [-2] < patterns > counts";
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,21 +16,24 @@ const char *help = "glookup [-p google-ngram-path] [-a] < patterns > counts";
 
 static char *path = ".";	/* google-ngram path */
 static int all_ngrams = 0;	/* whether to print all ngrams matching a wildcard pattern */
+static int no_n2 = 0;		/* whether to compute n2 (by default we do but it takes memory) */
 
 static struct option long_options[] = {
   {"path", 1, 0, 'p'},
   {"all", 0, 0, 'a'},
+  {"no_n2", 0, 0, '2'},
   {0, 0, 0, 0}
 };
 
 void get_options(int argc, char *argv[]) {
   while(1) {
     int option_index = 0;
-    int c = getopt_long_only(argc, argv, "p:a", long_options, &option_index);
+    int c = getopt_long_only(argc, argv, "p:a2", long_options, &option_index);
     if (c == -1) break;
     switch(c) {
     case 'p': path = optarg; break;
     case 'a': all_ngrams = 1; break;
+    case '2': no_n2 = 1; break;
     default: g_message(help); exit(0);
     }
   }
@@ -63,6 +66,7 @@ typedef Token EmptyPattern[NGRAM_ORDER + 1];
 
 #define ngram_size(p) (*(p))
 #define ngram_copy(p) g_memdup(p, (ngram_size(p)+1)*sizeof(Token))
+void ngram_free(gpointer p) { if (p != NULL) g_free(p); }
 
 #define foreach_tok(var, ngm)\
   for (register guint32 _i = 1, _l = ngram_size(ngm), var = 0;\
@@ -77,13 +81,14 @@ void ngram_from_string(Ngram ngm, char *str) {
   ngm[0] = ntok;
 }
 
-void ngram_to_gstring(GString *g, Ngram pat) {
+char *ngram_to_gstring(GString *g, Ngram pat) {
   int n = 0;
   g_string_truncate(g, 0);
   foreach_tok(pi, pat) {
     if (n++) g_string_append_c(g, ' ');
     g_string_append(g, g_quark_to_string(pi));
   }
+  return g->str;
 }
 
 int ngram_count_wildcards(Ngram pat) {
@@ -94,7 +99,12 @@ int ngram_count_wildcards(Ngram pat) {
   return nw;
 }
 
-void ngram_free(gpointer p) { free(p); }
+void ngram_print_count(Ngram ngm, guint64 n0) {
+  static GString *g;
+  if (g == NULL) g = g_string_new(NULL);
+  printf("%s\t%" G_GUINT64_FORMAT "\n",
+	 ngram_to_gstring(g, ngm), n0);
+}
 
 
 /** Counters: we keep track of up to three types of counts.
@@ -102,6 +112,12 @@ void ngram_free(gpointer p) { free(p); }
  * n1 is the total number of distinct ngrams that match.
  * n2 is the hash of distinct last words that match.
  * (used in kn smoothing) */
+
+/** Patterns with no wildcards have NULL counters, their counts do not
+ *  need to be stored in memory and are directly printed out.  Only
+ *  patterns that have two or more wildcards, one of which is the last
+ *  token need n2 hash.
+ */
 
 typedef struct CounterS {
   guint64 n0;
@@ -111,17 +127,21 @@ typedef struct CounterS {
 
 Counter counter_new(Pattern pat) {
   Counter cnt = g_new0(struct CounterS, 1);
-  int nwild = ngram_count_wildcards(pat);
-  if ((nwild > 1) &&
-      (pat[ngram_size(pat)] == ANY))
-    cnt->n2 = g_hash_table_new(g_direct_hash, g_direct_equal);
+  if (!no_n2) {
+    int nwild = ngram_count_wildcards(pat);
+    if ((nwild > 1) &&
+	(pat[ngram_size(pat)] == ANY))
+      cnt->n2 = g_hash_table_new(g_direct_hash, g_direct_equal);
+  }
   return cnt;
 }
 
 void counter_free(gpointer val) {
-  Counter cnt = val;
-  if (cnt->n2 != NULL) free_hash(cnt->n2);
-  free(cnt);
+  if (val != NULL) {
+    Counter cnt = val;
+    if (cnt->n2 != NULL) free_hash(cnt->n2);
+    g_free(cnt);
+  }
 }
 
 
@@ -160,19 +180,17 @@ Hash pattern_hash_init() {
 /* To print the pattern counts after going through google ngrams */
 
 void pattern_hash_print_fn(Pattern pat, Counter cnt, GString *gstr) {
-  ngram_to_gstring(gstr, pat);
-  fputs(gstr->str, stdout);
-  fputc('\t', stdout);
-  printf("%" G_GUINT64_FORMAT, cnt->n0);
+  /* Do not print patterns with zero count or patterns with no
+     wildcards - no wildcards get printed out when first seen. */
+  if ((cnt == NULL) || (cnt->n0 == 0)) return;
+
+  printf("%s\t%" G_GUINT64_FORMAT,
+	 ngram_to_gstring(gstr, pat), cnt->n0);
   int nwild = ngram_count_wildcards(pat);
-  if (nwild > 0) printf("\t%u", cnt->n1);
-  int n = ngram_size(pat);
-  if (pat[n] == ANY) {
-    printf("\t%u",
-	   (cnt->n2 != NULL) ? hlen(cnt->n2)
-	   : nwild == 1 ? cnt->n1
-	   : cnt->n0 == 0 ? 0
-	   : (g_message("Warning: No n2 for [%s]", gstr->str), 0));
+  if (nwild > 0) {
+    printf("\t%u", cnt->n1);
+    if (cnt->n2 != NULL) 
+      printf("\t%u", hlen(cnt->n2));
   }
   fputc('\n', stdout);
 }
@@ -246,9 +264,9 @@ Mask **mask_table_init(Hash patterns) {
 
 void mask_table_free(Mask **mask_table) {
   for (int n = NGRAM_ORDER; n > 0; n--) {
-    free(mask_table[n]);
+    g_free(mask_table[n]);
   }
-  free(mask_table);
+  g_free(mask_table);
 }
 
 void mask_table_dump(Mask **mask_table) {
@@ -256,9 +274,7 @@ void mask_table_dump(Mask **mask_table) {
   for (int n = 1; n <= NGRAM_ORDER; n++) {
     Mask *masks = mask_table[n];
     foreach_mask(m, masks) {
-      ngram_to_gstring(g, m);
-      fputs(g->str, stderr);
-      fputc('\n', stderr);
+      fprintf(stderr, "%s\n", ngram_to_gstring(g, m));
     }
   }
   g_string_free(g, TRUE);
@@ -276,7 +292,8 @@ Hash read_patterns() {
   foreach_line(str, NULL) {
     ngram_from_string(pat, str);
     if (!hgot(patterns, pat)) {
-      Counter cnt = counter_new(pat);
+      int nwild = ngram_count_wildcards(pat);
+      Counter cnt = (nwild > 0) ? counter_new(pat) : NULL;
       hset(patterns, ngram_copy(pat), cnt);
     }
   }
@@ -291,22 +308,22 @@ Hash read_patterns() {
 
 void count_ngram(Hash patterns, Ngram ngm, guint64 ngram_cnt, Mask *masks) {
   EmptyPattern pat;
+  gpointer key, val;
+  Counter cnt;
   int nowild = 0;	/* whether this ngram matches exactly */
   int nmatch = 0;	/* whether this ngram matches any patterns
 			   (except all wildcards) */
 
   foreach_mask(m, masks) {
     mask_apply(m, ngm, pat);
-    Counter cnt = hget(patterns, pat);
-    if (cnt != NULL) {
+    if (g_hash_table_lookup_extended(patterns, pat, &key, &val)) {
       int nwild = ngram_count_wildcards(pat);
       if (nwild == 0) {
-	if ((cnt->n0 != 0) && (cnt->n0 != ngram_cnt)) {
-	  g_message("Warning: Duplicate count found");
-	}
-	cnt->n0 = ngram_cnt;
 	nowild = 1;
+	ngram_print_count(ngm, ngram_cnt);
+	hdel(patterns, pat);
       } else {
+	cnt = (Counter) val;
 	int n = ngram_size(ngm);
 	if (nwild < n) nmatch = 1;
 	cnt->n0 += ngram_cnt;
@@ -321,17 +338,15 @@ void count_ngram(Hash patterns, Ngram ngm, guint64 ngram_cnt, Mask *masks) {
 
   /* if we have a match for this ngram (nmatch) and (1) the user wants
      us to count all matching ngrams as well (all_ngrams), (2) the
-     ngram itself is not in the pattern list (!nowild), we add the
-     ngram with its count to the pattern list.  The only exception is
-     when the only pattern the ngram matched is an all wild pattern,
-     in which case the user probably did not want us to dump the whole
+     ngram itself is not in the pattern list (!nowild), we print the
+     ngram with its count right away.  The only exception is when the
+     only pattern the ngram matched is an all wild pattern, in which
+     case the user probably did not want us to dump the whole
      database.  The (nwild < n) condition above caters for that. */
 
   if (all_ngrams && nmatch && !nowild) {
     g_assert(hget(patterns, ngm) == NULL);
-    Counter cnt = counter_new(ngm);
-    cnt->n0 = ngram_cnt;
-    hset(patterns, ngram_copy(ngm), cnt);
+    ngram_print_count(ngm, ngram_cnt);
   }
 }
 
@@ -395,6 +410,7 @@ int main(int argc, char *argv[]) {
   pattern_hash_print(patterns);
 
   g_message("Cleaning up...");
+  g_hash_table_analyze(patterns);
   free_hash(patterns);
   mask_table_free(masks);
 
