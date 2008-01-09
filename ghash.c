@@ -28,13 +28,13 @@
  * MT safe
  */
 
-#include "config.h"
+/* #include "config.h" */
 
 #include "glib.h"
 
 
 #define HASH_TABLE_MIN_SIZE 11
-#define HASH_TABLE_MAX_SIZE 13845163
+#define HASH_TABLE_MAX_SIZE 1796357117
 
 
 typedef struct _GHashNode      GHashNode;
