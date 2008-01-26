@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.3 2008/01/26 14:47:49 dyuret Exp dyuret $ } ."\n";
+warn q{$Id$ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -28,8 +28,8 @@ my @A = (undef, undef, 6.3712181,  6.2403967, 6.2855943,  5.375136); # 8.0605878
 my @B = (undef, undef, 0.00,       0.00,      2.4973338,  2.457501); 
 my @C = (undef, undef, 0.12244049, 0.4886369, 0.74636033, 0.83561995); # 8.22092294839358
 my @D = (undef, undef, 6.7131229,  5.9414447, 6.5528203,  5.7060572); # 8.06083590891475
-my @KN0 = (0.78825346, 1.8085538, 1.7059951, 3.1911228, 3.9578511, 5.4777073, 5.1142141); # 8.25784993465366 after fix (using n2_x_); 7.8096796782004 before fix (using n1x_); both using mc2=n0x-n0x_ in kn.
-my @KN = (3.2286943, 1.2179301, 5.6215879, 2.2047427, 9.4821263, 3.6767551, 5.7211678); # 8.47444113908134 using n0x_ and no mc2.
+#my @KN = (0.78825346, 1.8085538, 1.7059951, 3.1911228, 3.9578511, 5.4777073, 5.1142141); # 8.25784993465366 after fix; 7.8096796782004 before fix
+my @KN = (0.18477542, 1.2406021, 1.3108472, 2.1149741, 2.4422168, 3.5026924, 1.9153686); # 8.25372770020088 reoptimized after fix
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
@@ -377,7 +377,7 @@ sub bits {
 sub kn {
     my ($s, $i, $n) = @_;
     my ($nxy, $x, $nx_, $n1x_, $kn, $D);
-    # my ($nx, $mc);
+    my ($nx, $mc);
     $n = 5 if not defined $n;
     if ($n < 0) {
 	die "Bad n [$n]";
@@ -409,11 +409,11 @@ sub kn {
     }    
     die if $n <= 1;
     $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
-    # $nx = n0($x);
+    $nx = n0($x);
     $nx_ = n0($x . ' _');
-    # $mc = $nx - $nx_;
+    $mc = $nx - $nx_;
     warn("kn($s->[$i],$i,$n): nx_ = $nx_\n") if $debug;
-    if ($nx_ == 0) {
+    if ($nx == 0) {
 	return kn($s, $i, $n-1);
     } elsif ((" $x " =~ / [;!?.] /)
 	     and not ($x =~ /^[^;!?.]*[;!?.]$/ and $s->[$i] eq '</S>'))
@@ -427,13 +427,14 @@ sub kn {
     $D = $MINNGRAM/(1+exp(-$KN[2*$n-4]));
     warn("kn($s->[$i],$i,$n): D = $D\n") if $debug;
     $nxy -= $D if $nxy > 0;
+    #$kn = $nxy / $nx_ + ($n1x_ * $D / $nx_) * kn0($s, $i, $n-1);
 
-    #warn("kn($s->[$i],$i,$n): x = [$x] nx = $nx\n") if $debug;
-    #warn("kn($s->[$i],$i,$n): mc = $mc\n") if $debug;
+    warn("kn($s->[$i],$i,$n): x = [$x] nx = $nx\n") if $debug;
+    warn("kn($s->[$i],$i,$n): mc = $mc\n") if $debug;
     my $kn0 = kn0($s, $i, $n-1);
     warn("kn($s->[$i],$i,$n): kn0 = $kn0\n") if $debug;
 
-    $kn = $nxy / $nx_ + (($n1x_ * $D) / $nx_) * $kn0;
+    $kn = $nxy / $nx + (($mc + $n1x_ * $D) / $nx) * $kn0;
 
     warn("kn($s->[$i],$i,$n): kn = $kn\n") if $debug;
     if ($patterns) { 
@@ -450,7 +451,7 @@ sub kn {
 sub kn0 {
     my ($s, $i, $n) = @_;
     warn("kn0($s->[$i],$i,$n): hello\n") if $debug;
-    my ($x, $n1_xy, $n1_x_, $n1x_, $D, $kn0);
+    my ($x, $n1_xy, $n1_x_, $n1x_, $D, $kn0); #DBG: get rid of n1x_
     if ($n < 0) {
 	die "Bad n [$n]";
     } elsif ($n == 0) {
@@ -471,7 +472,7 @@ sub kn0 {
     $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
     $n1_x_ = n1("_ $x _");
     warn("kn0($s->[$i],$i,$n): n1_x_ = $n1_x_\n") if $debug;
-    if ($n1_x_ == 0) {
+    if ($n1_x_ == 0) {		#DBG add semicolon condition here
 	return kn0($s, $i, $n-1);
     }
     die "KN0 zero denominator [$x]" if $n1_x_ == 0;
@@ -527,7 +528,7 @@ sub dhc {
     my ($i, $iter, $maxiter);
     my $NDIM = scalar(@x);
     my $THRESHOLD = 1e-4;
-    my $INIT_SIZE = 1;
+    my $INIT_SIZE = 0.1;
     my $count = 0;
 
     for($i=0; $i<$NDIM; $i++) {
