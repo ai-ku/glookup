@@ -1,13 +1,15 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 2.5 2007/04/27 05:13:51 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 2.6 2007/05/19 11:30:35 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
 use PDL;
 use PDL::Opt::Simplex;
-require 'gngram.pl';
-require 'fileio.pl';
-require 'dhc.pl';
+my $oldfh = select(STDERR); $| = 1; select($oldfh);
+require 'gtokenize.pl';
+my $log2 = log(2);
+sub log2 { log($_[0])/$log2; }
+sub exp2 { exp($_[0]*$log2); }
 
 # Command line options:
 
@@ -21,12 +23,12 @@ my $ngram = 5;
 my $random = 0;
 my $zeroes = 0;
 # smoothing = { linear, product, baseline, kn }
-my $smoothing = 'linear';
+my $smoothing = 'product';
 my @A = (undef, undef, 6.3712181,  6.2403967, 6.2855943,  5.375136); # 8.06058787993131
 my @B = (undef, undef, 0.00,       0.00,      2.4973338,  2.457501); 
 my @C = (undef, undef, 0.12244049, 0.4886369, 0.74636033, 0.83561995); # 8.22092294839358
 my @D = (undef, undef, 6.7131229,  5.9414447, 6.5528203,  5.7060572); # 8.06083590891475
-my @KN = (0.78825346, 1.8085538, 1.7059951, 3.1911228, 3.9578511, 5.4777073, 5.1142141);
+my @KN = (0.78825346, 1.8085538, 1.7059951, 3.1911228, 3.9578511, 5.4777073, 5.1142141); # 8.00184764338939
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
@@ -65,8 +67,12 @@ my %score_fn = ('linear' => \&score_linear, 'product' => \&score_product, 'basel
 
 # Main:
 
-my $GTotal = $patterns ? 1024908267229 : ginit($cachefile);
-warn "gtotal=$GTotal\n";
+die "Please specify -cache cntfile or -patterns to output patterns\n"
+    if not $cachefile and not $patterns;
+my $ZERO_WARNING;
+my (%n0, %n1, %n2);
+my $GTotal = $patterns ? 1024908267229 : cnt_init($cachefile);
+warn "\ngtotal=$GTotal\n";
 my $corpus = read_corpus();
 warn "corpus=" . scalar(@$corpus) . " sentences\n";
 my $nline = 0;
@@ -242,7 +248,7 @@ sub process_sentence {
     my $nbits;
     if (!$patterns) {
 	for (my $i = 1; $i < $#{$s}; $i++) {
-	    if (myngram($s->[$i]) == 0) { 
+	    if (n0($s->[$i]) == 0) { 
 		warn "Warning[$nline]: [$s->[$i]] unknown, skipping sentence.\n"
 		    if not $optimize;
 		return (0, 0);
@@ -267,11 +273,11 @@ sub process_sentence {
 
 sub read_corpus {
     my @corpus;
-    readfile('', sub {
+    while(<>) {
 	return unless /\S/;
 	my @s = ('<S>', gtokenize($_), '</S>');
 	push @corpus, \@s;
-    });
+    }
     return \@corpus;
 }
 
@@ -284,7 +290,7 @@ sub bits {
 	return -log2($pb);
     }
     if ($n == 1) {
-	my $g = myngram($s->[$i]);
+	my $g = n0($s->[$i]);
 
 	# BUG: Any word below 200 count is excluded from the google
 	# data.  We will give such words a count of 100.  Note that
@@ -300,7 +306,7 @@ sub bits {
     }
 
     my $a = join(' ', @{$s}[($i-$n+1) .. ($i-1)]); # a = n-1 word prefix
-    my $ga = myngram($a);	# ga = count of a
+    my $ga = n0($a);	# ga = count of a
     my $x = bits($s, $i, $n-1);	# x = lower order model bits
     if ($ga == 0) { 
 #	    warn "Warning: Zero a-count[$a]\n" 
@@ -309,9 +315,9 @@ sub bits {
     }
     my $px = exp2(-$x);		# px = lower order model probability
     my $b = $a . " $s->[$i]";	# b = all n words
-    my $gb = myngram($b);	# gb = count of b
-    my $c = $a . " :?:";	# c = all ngrams that start with a
-    my $gc = myngram($c);	# gc = count of c
+    my $gb = n0($b);	# gb = count of b
+    my $c = $a . " _";	# c = all ngrams that start with a
+    my $gc = n0($c);	# gc = count of c
     my $missing_count = $ga - $gc; # missing_count = occurances of (a) 
     #   that are missing from ngram data
     my $pb;
@@ -380,10 +386,10 @@ sub kn {
  	# is exactly equivalent to k/N.  If the word is not known it
  	# is cheating.
 	
- 	# return 1/myngram('_');
+ 	# return 1/n1('_');
 	die "Bad n [$n]";
     } elsif ($n == 1) {
-	my $g = myngram($s->[$i]);
+	my $g = n0($s->[$i]);
 
 	# BUG: Any word below 200 count is excluded from the google
 	# data.  We will give such words a count of 100.  Note that
@@ -400,9 +406,10 @@ sub kn {
     } elsif ($n > $i + 1) {
 	return kn($s, $i, $i+1);
     }    
-    $x = ($n > 1) ? join(' ', @{$s}[($i-$n+1) .. ($i-1)]).' ' : '';
-    $nx = myngram($x);
-    $nx_ = myngram($x . ':?:');
+    die if $n <= 1;
+    $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
+    $nx = n0($x);
+    $nx_ = n0($x . ' _');
     $mc = $nx - $nx_;
     warn("kn($s->[$i],$i,$n): nx_ = $nx_\n") if $debug;
     if ($nx == 0) {
@@ -410,9 +417,9 @@ sub kn {
     } elsif (" $x" =~ / [;!?.] /) { # bad context
 	return kn($s, $i, $n-1);
     }	
-    $n1x_ = myngram($x . '_');
+    $n1x_ = n1("$x _");
     warn("kn($s->[$i],$i,$n): n1x_ = $n1x_\n") if $debug;
-    $nxy = myngram($x . $s->[$i]);
+    $nxy = n0("$x $s->[$i]");
     warn("kn($s->[$i],$i,$n): nxy = $nxy\n") if $debug;
     $D = $MINNGRAM/(1+exp(-$KN[2*$n-4]));
     warn("kn($s->[$i],$i,$n): D = $D\n") if $debug;
@@ -445,29 +452,30 @@ sub kn0 {
     if ($n < 0) {
 	die "Bad n [$n]";
     } elsif ($n == 0) {
-	# return 1/myngram('_');
+	# return 1/n1('_');
 	die "Bad n [$n]";
     } elsif ($n == 1) {
-	my $n1_y = myngram('_ ' . $s->[$i]);
+	my $n1_y = n1('_ ' . $s->[$i]);
 	if ($n1_y == 0) {
 	    warn("kn0($s->[$i],$i,$n): n1_y($s->[$i]) == 0\n") if $debug;
 	    # BUG: verify that this is exactly what would happen if we smoothed with a 0-order 1/V model
 	    $n1_y = 1;
 	}
-	my $n1__ = myngram('_ _');
+	my $n1__ = n1('_ _');
 	warn("kn0($s->[$i],$i,$n): n1_y=$n1_y n1__=$n1__\n") if $debug;
 	return $n1_y / $n1__;
     }
-    $x = ($n > 1) ? join(' ', @{$s}[($i-$n+1) .. ($i-1)]).' ' : '';
-    $n1_x_ = myngram('_ ' . $x . '_');
+    die if $n <= 1;
+    $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
+    $n1_x_ = n1("_ $x _");
     warn("kn0($s->[$i],$i,$n): n1_x_ = $n1_x_\n") if $debug;
     if ($n1_x_ == 0) {
 	return kn0($s, $i, $n-1);
     }
     die "KN0 zero denominator [$x]" if $n1_x_ == 0;
-    $n1x_ = myngram($x . '_');
+    $n1x_ = n1("$x _");
     warn("kn0($s->[$i],$i,$n): n1x_ = $n1x_\n") if $debug;
-    $n1_xy = myngram('_ ' . $x . $s->[$i]);
+    $n1_xy = n1("_ $x $s->[$i]");
     warn("kn0($s->[$i],$i,$n): n1_xy = $n1_xy\n") if $debug;
     $D = 1/(1+exp(-$KN[2*$n-3]));
     warn("kn0($s->[$i],$i,$n): D = $D\n") if $debug;
@@ -483,25 +491,162 @@ sub kn0 {
     return $kn0;
 }
 
-sub myngram {
-    my $str = shift;
+# sub myngram {
+#     my $str = shift;
+#     if ($patterns) {
+# 	if (not defined $myngram{$str}) {
+# 	    $myngram{$str} = 1;
+# 	    print "$str\n";
+# 	}
+# 	return 1;
+#     } else {
+
+# 	# BUG: temporary fix
+# 	$str =~ s/^\s+//;
+# 	$str =~ s/\s+$//;
+# 	if ($str =~ /^<S>$/) {
+# 	    return 95119665584;
+# 	}
+# 	# End of temporary fix
+
+# 	return gngram($str);
+#     }
+# }
+
+sub dhc {
+    my ($f, $xpdl) = @_;
+    my @x = list $xpdl;
+    my (@u, @v, @xv);
+    my ($fx, $fxv);
+    my ($vi, $vvec);
+    my $vr;
+    my ($i, $iter, $maxiter);
+    my $NDIM = scalar(@x);
+    my $THRESHOLD = 1e-4;
+    my $INIT_SIZE = 1;
+    my $count = 0;
+
+    for($i=0; $i<$NDIM; $i++) {
+	$u[$i] = 0; 
+	$v[$i] = 0;
+    }
+    $vi = -1; $vvec = 1;
+    $vr = -$INIT_SIZE;
+    $fx = &$f(pdl(@x));
+    $fxv = 1E10;
+
+    printf("%d. %.12g <= ", ++$count, $fx);
+    for($i=0; $i<$NDIM; $i++) { printf("%.12g ", $x[$i]); }; printf("\n");
+
+    while(abs($vr) >= $THRESHOLD) {
+	$maxiter = ((abs($vr) < 2*$THRESHOLD) ? 2*$NDIM : 2);
+	$iter = 0;
+	while(($fxv >= $fx) && ($iter < $maxiter)) {
+	    if($iter == 0) { for($i=0; $i<$NDIM; $i++) { $xv[$i] = $x[$i]; } }
+	    else { $xv[$vi] -= $vr; }
+	    if($vvec) { $vvec = 0; }
+	    $vr = -$vr;
+	    if($vr > 0) { $vi = (($vi+1) % $NDIM); }
+	    $xv[$vi] += $vr;
+	    $fxv = &$f(pdl(@xv));
+	    $iter++;
+	}
+	if($fxv >= $fx) {
+	    $fxv = 1E10;
+	    $vr /= 2;
+	} else {
+	    $fx = $fxv; printf("%d. %.12g <= ", ++$count, $fx);
+	    for($i=0; $i<$NDIM; $i++) { $x[$i] = $xv[$i]; printf("%.12g ", $x[$i]); }
+	    printf("\n");
+	    if($iter == 0) {
+		if($vvec) {
+		    for($i=0; $i<$NDIM; $i++) {
+			$u[$i] += $v[$i]; $v[$i] *= 2; $xv[$i] += $v[$i];
+		    }
+		    $vr *= 2;
+		} else {
+		    $u[$vi] += $vr; $vr *= 2; $xv[$vi] += $vr;
+		}
+		$fxv = &$f(pdl(@xv));
+	    } else {
+		for($i=0; $i<$NDIM; $i++) { $xv[$i] += $u[$i]; }
+		$xv[$vi] += $vr;
+		$fxv = &$f(pdl(@xv));
+		if($fxv >= $fx) {
+		    for($i=0; $i<$NDIM; $i++) { $u[$i] = 0; $xv[$i] = $x[$i]; }
+		    $u[$vi] = $vr; $vr *= 2;
+		    $xv[$vi] += $vr; $fxv = &$f(pdl(@xv));
+		} else {
+		    for($i=0; $i<$NDIM; $i++) { $x[$i] = $xv[$i]; } $fx = $fxv;
+		    $u[$vi] += $vr;
+		    for($i=0; $i<$NDIM; $i++) { $v[$i] = 2*$u[$i]; } $vvec = 1;
+		    for($i=0; $i<$NDIM; $i++) { $xv[$i] += $v[$i]; } $fxv = &$f(pdl(@xv));
+		    for($vr=0,$i=0; $i<$NDIM; $i++) { $vr += $v[$i]*$v[$i]; }
+		    $vr = sqrt($vr);
+		}
+	    }
+	}
+    }
+    return (&$f(pdl(@x)), pdl(@x));
+}
+
+sub cnt_init {
+    my $path = shift;
+    return if not defined $path;
+    open(FP, $path) or die $!;
+    while(<FP>) {
+	chomp;
+	my ($pat, $n0, $n1, $n2) = split(/\t/);
+	die if not defined $pat;
+	die if not defined $n0;
+	$n0{$pat} = $n0;
+	$n1{$pat} = $n1 if defined $n1;
+	$n2{$pat} = $n2 if defined $n2;
+	print STDERR '.' unless $. % 100000;
+    }
+    close(FP);
+    return $n0{_};
+}
+
+sub n0 {
+    my $pat = shift;
     if ($patterns) {
-	if (not defined $myngram{$str}) {
-	    $myngram{$str} = 1;
-	    print "$str\n";
-	}
+	print "$pat\n" if 0 == $myngram{$pat}++;
 	return 1;
+    } elsif (defined $n0{$pat}) {
+	return $n0{$pat};
     } else {
+	warn "[$pat] some patterns not found, using zero\n" 
+	    unless $ZERO_WARNING++;
+	return 0;
+    }
+}
 
-	# BUG: temporary fix
-	$str =~ s/^\s+//;
-	$str =~ s/\s+$//;
-	if ($str =~ /^<S>$/) {
-	    return 95119665584;
-	}
-	# End of temporary fix
+sub n1 {
+    my $pat = shift;
+    if ($patterns) {
+	print "$pat\n" if 0 == $myngram{$pat}++;
+	return 1;
+    } elsif (defined $n1{$pat}) {
+	return $n1{$pat};
+    } else {
+	warn "[$pat] some patterns not found, using zero\n" 
+	    unless $ZERO_WARNING++;
+	return 0;
+    }
+}
 
-	return gngram($str);
+sub n2 {
+    my $pat = shift;
+    if ($patterns) {
+	print "$pat\n" if 0 == $myngram{$pat}++;
+	return 1;
+    } elsif (defined $n2{$pat}) {
+	return $n2{$pat};
+    } else {
+	warn "[$pat] some patterns not found, using zero\n" 
+	    unless $ZERO_WARNING++;
+	return 0;
     }
 }
 
