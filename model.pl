@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 2.6 2007/05/19 11:30:35 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.1 2008/01/26 13:38:13 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -28,7 +28,7 @@ my @A = (undef, undef, 6.3712181,  6.2403967, 6.2855943,  5.375136); # 8.0605878
 my @B = (undef, undef, 0.00,       0.00,      2.4973338,  2.457501); 
 my @C = (undef, undef, 0.12244049, 0.4886369, 0.74636033, 0.83561995); # 8.22092294839358
 my @D = (undef, undef, 6.7131229,  5.9414447, 6.5528203,  5.7060572); # 8.06083590891475
-my @KN = (0.78825346, 1.8085538, 1.7059951, 3.1911228, 3.9578511, 5.4777073, 5.1142141); # 8.00184764338939
+my @KN = (0.78825346, 1.8085538, 1.7059951, 3.1911228, 3.9578511, 5.4777073, 5.1142141); # 8.45193979680938
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
@@ -480,7 +480,8 @@ sub kn0 {
     $D = 1/(1+exp(-$KN[2*$n-3]));
     warn("kn0($s->[$i],$i,$n): D = $D\n") if $debug;
     $n1_xy -= $D if $n1_xy > 0;
-    $kn0 = $n1_xy / $n1_x_ + ($n1x_ * $D / $n1_x_) * kn0($s, $i, $n-1);
+    my $n2_x_ = n2("_ $x _");
+    $kn0 = $n1_xy / $n1_x_ + ($n2_x_ * $D / $n1_x_) * kn0($s, $i, $n-1);
 
     # new formula: does not really work
 #     my $n1x = myngram($x);
