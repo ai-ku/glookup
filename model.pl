@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id$ } ."\n";
+warn q{$Id: model.pl,v 3.5 2008/01/26 20:53:09 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -29,7 +29,9 @@ my @B = (undef, undef, 0.00,       0.00,      2.4973338,  2.457501);
 my @C = (undef, undef, 0.12244049, 0.4886369, 0.74636033, 0.83561995); # 8.22092294839358
 my @D = (undef, undef, 6.7131229,  5.9414447, 6.5528203,  5.7060572); # 8.06083590891475
 #my @KN = (0.78825346, 1.8085538, 1.7059951, 3.1911228, 3.9578511, 5.4777073, 5.1142141); # 8.25784993465366 after fix; 7.8096796782004 before fix
-my @KN = (0.18477542, 1.2406021, 1.3108472, 2.1149741, 2.4422168, 3.5026924, 1.9153686); # 8.25372770020088 reoptimized after fix
+#my @KN = (0.18477542, 1.2406021, 1.3108472, 2.1149741, 2.4422168, 3.5026924, 1.9153686); # 8.25372770020088 reoptimized after fix
+#my @KN = (0.5460628731330993, 0.775668801099801, 0.7876548885616731, 0.8923500856395791, 0.9199904141525053, 0.970764279164452, 0.8716210816939955); # reverted to regular coeff, previously we had to do 1/(1+exp(-KN[i])).  now it is just KN[i].
+my @KN = (0.99997107, 0.78039703, 0.84649372, 0.88490092, , 0.9999039, 0.96983783, 0.87254753);
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
@@ -217,6 +219,9 @@ sub score_kn {
     my $x = shift;
     $nscore++;
     for (my $i = 0; $i < $x->nelem; $i++) {
+	if ($x->at($i) < 0 or $x->at($i) > 1) {
+	    return $infinity;
+	}
 	$KN[$i] = $x->at($i);
     }
     my $bits = ngram();
@@ -414,17 +419,17 @@ sub kn {
     $mc = $nx - $nx_;
     warn("kn($s->[$i],$i,$n): nx_ = $nx_\n") if $debug;
     if ($nx == 0) {
-	return kn($s, $i, $n-1);
+	return kn0($s, $i, $n-1);
     } elsif ((" $x " =~ / [;!?.] /)
 	     and not ($x =~ /^[^;!?.]*[;!?.]$/ and $s->[$i] eq '</S>'))
     { # bad context
-	return kn($s, $i, $n-1);
+	return kn0($s, $i, $n-1);
     }	
     $n1x_ = n1("$x _");
     warn("kn($s->[$i],$i,$n): n1x_ = $n1x_\n") if $debug;
     $nxy = n0("$x $s->[$i]");
     warn("kn($s->[$i],$i,$n): nxy = $nxy\n") if $debug;
-    $D = $MINNGRAM/(1+exp(-$KN[2*$n-4]));
+    $D = $MINNGRAM * $KN[2*$n-4];
     warn("kn($s->[$i],$i,$n): D = $D\n") if $debug;
     $nxy -= $D if $nxy > 0;
     #$kn = $nxy / $nx_ + ($n1x_ * $D / $nx_) * kn0($s, $i, $n-1);
@@ -451,7 +456,7 @@ sub kn {
 sub kn0 {
     my ($s, $i, $n) = @_;
     warn("kn0($s->[$i],$i,$n): hello\n") if $debug;
-    my ($x, $n1_xy, $n1_x_, $n1x_, $D, $kn0); #DBG: get rid of n1x_
+    my ($x, $n1_xy, $n1_x_, $D, $kn0);
     if ($n < 0) {
 	die "Bad n [$n]";
     } elsif ($n == 0) {
@@ -472,15 +477,17 @@ sub kn0 {
     $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
     $n1_x_ = n1("_ $x _");
     warn("kn0($s->[$i],$i,$n): n1_x_ = $n1_x_\n") if $debug;
-    if ($n1_x_ == 0) {		#DBG add semicolon condition here
+    if ($n1_x_ == 0) {
 	return kn0($s, $i, $n-1);
-    }
+    } elsif ((" $x " =~ / [;!?.] /)
+	     and not ($x =~ /^[^;!?.]*[;!?.]$/ and $s->[$i] eq '</S>'))
+    { # bad context
+	return kn0($s, $i, $n-1);
+    }	
     die "KN0 zero denominator [$x]" if $n1_x_ == 0;
-    $n1x_ = n1("$x _");
-    warn("kn0($s->[$i],$i,$n): n1x_ = $n1x_\n") if $debug;
     $n1_xy = n1("_ $x $s->[$i]");
     warn("kn0($s->[$i],$i,$n): n1_xy = $n1_xy\n") if $debug;
-    $D = 1/(1+exp(-$KN[2*$n-3]));
+    $D = $KN[2*$n-3];
     warn("kn0($s->[$i],$i,$n): D = $D\n") if $debug;
     $n1_xy -= $D if $n1_xy > 0;
     my $n2_x_ = n2("_ $x _");
