@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.5 2008/01/26 20:53:09 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.6 2008/01/26 21:20:02 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -31,7 +31,7 @@ my @D = (undef, undef, 6.7131229,  5.9414447, 6.5528203,  5.7060572); # 8.060835
 #my @KN = (0.78825346, 1.8085538, 1.7059951, 3.1911228, 3.9578511, 5.4777073, 5.1142141); # 8.25784993465366 after fix; 7.8096796782004 before fix
 #my @KN = (0.18477542, 1.2406021, 1.3108472, 2.1149741, 2.4422168, 3.5026924, 1.9153686); # 8.25372770020088 reoptimized after fix
 #my @KN = (0.5460628731330993, 0.775668801099801, 0.7876548885616731, 0.8923500856395791, 0.9199904141525053, 0.970764279164452, 0.8716210816939955); # reverted to regular coeff, previously we had to do 1/(1+exp(-KN[i])).  now it is just KN[i].
-my @KN = (0.99997107, 0.78039703, 0.84649372, 0.88490092, , 0.9999039, 0.96983783, 0.87254753);
+my @KN = (0.99995991, 0.77863959, 0.88904476, 0.8848464, 0.99998673, 0.92481573, 0.87162108); # 8.35819204086292
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
@@ -412,6 +412,8 @@ sub kn {
     } elsif ($n > $i + 1) {
 	return kn($s, $i, $i+1);
     }    
+    if ($n == 5) { return kn0($s, $i, $n-1); }
+
     die if $n <= 1;
     $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
     $nx = n0($x);
@@ -419,11 +421,11 @@ sub kn {
     $mc = $nx - $nx_;
     warn("kn($s->[$i],$i,$n): nx_ = $nx_\n") if $debug;
     if ($nx == 0) {
-	return kn0($s, $i, $n-1);
+	return kn($s, $i, $n-1);
     } elsif ((" $x " =~ / [;!?.] /)
 	     and not ($x =~ /^[^;!?.]*[;!?.]$/ and $s->[$i] eq '</S>'))
     { # bad context
-	return kn0($s, $i, $n-1);
+	return kn($s, $i, $n-1);
     }	
     $n1x_ = n1("$x _");
     warn("kn($s->[$i],$i,$n): n1x_ = $n1x_\n") if $debug;
