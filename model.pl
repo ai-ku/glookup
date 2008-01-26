@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.7 2008/01/26 21:33:12 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.8 2008/01/26 21:36:20 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -28,6 +28,7 @@ my @A = (undef, undef, 6.3712181,  6.2403967, 6.2855943,  5.375136); # 8.0605878
 my @B = (undef, undef, 0.00,       0.00,      2.4973338,  2.457501); 
 my @C = (undef, undef, 0.12244049, 0.4886369, 0.74636033, 0.83561995); # 8.22092294839358
 my @D = (undef, undef, 6.7131229,  5.9414447, 6.5528203,  5.7060572); # 8.06083590891475
+my @E = (undef, undef, 0.50813193, 0.798793, 0.92605047, 0.98232709); # 8.30401190127916
 #my @KN = (0.78825346, 1.8085538, 1.7059951, 3.1911228, 3.9578511, 5.4777073, 5.1142141); # 8.25784993465366 after fix; 7.8096796782004 before fix
 #my @KN = (0.18477542, 1.2406021, 1.3108472, 2.1149741, 2.4422168, 3.5026924, 1.9153686); # 8.25372770020088 reoptimized after fix
 my @KN = (0.5460628731330993, 0.775668801099801, 0.7876548885616731, 0.8923500856395791, 0.9199904141525053, 0.970764279164452, 0.8716210816939955); # reverted to regular coeff, previously we had to do 1/(1+exp(-KN[i])).  now it is just KN[i].
@@ -64,8 +65,8 @@ GetOptions('cache=s' => \$cachefile,
 	   'kn5=f' => \$KN[5],
 );
 
-my %init_fn = ('linear' => \&init_linear, 'product' => \&init_product, 'baseline' => \&init_baseline, 'kn' => \&init_kn);
-my %score_fn = ('linear' => \&score_linear, 'product' => \&score_product, 'baseline' => \&score_baseline, 'kn' => \&score_kn);
+my %init_fn = ('linear' => \&init_linear, 'product' => \&init_product, 'baseline' => \&init_baseline, 'kn' => \&init_kn, 'cdiscount' => \&init_cdiscount);
+my %score_fn = ('linear' => \&score_linear, 'product' => \&score_product, 'baseline' => \&score_baseline, 'kn' => \&score_kn, 'cdiscount' => \&score_cdiscount);
 
 # Main:
 
@@ -154,6 +155,15 @@ sub init_baseline {
     return $init;
 }
 
+sub init_cdiscount {
+    my $init;
+    my $ndims = $ngram - 1;
+    $init = $zeroes ? zeroes($ndims) 
+	: $random ? random($ndims)
+	: pdl(@E[2 .. $ngram]);
+    return $init;
+}
+
 sub init_kn {
     my $init;
     my $ndims = 2 * $ngram - 3;
@@ -208,6 +218,17 @@ sub score_baseline {
     $nscore++;
     for (my $i = 2; $i <= $ngram; $i++) {
 	$C[$i] = zero_one($x->at($i - 2));
+    }
+    my $bits = ngram();
+    warn "score[$nscore]: $bits $x\n";
+    return $bits;
+}
+
+sub score_cdiscount {			
+    my $x = shift;
+    $nscore++;
+    for (my $i = 2; $i <= $ngram; $i++) {
+	$E[$i] = zero_one($x->at($i - 2));
     }
     my $bits = ngram();
     warn "score[$nscore]: $bits $x\n";
@@ -335,6 +356,9 @@ sub bits {
 # going to add [.] to the list for the same reason even though there
 # seem to be bigrams starting with [.].
 
+    # BUG: Note that the following will fail if we try to score the
+    # </S> tokens.
+
     my $bad_context = 0;
     for my $tok (@{$s}[($i-$n+1) .. ($i-1)]) {
 	if ($tok =~ /^[;!?.]$/) {
@@ -345,34 +369,60 @@ sub bits {
     if ($bad_context) {
 	$pb = $px;
 
-    } elsif ($missing_count > 0) { # apply our smoothing formula
-	if ($smoothing eq 'linear') {
-	    my $extra = $A[$n] * $missing_count + exp10($B[$n] - 1.0); # want 0 when b=0
-	    $pb = ($gb + $px * ($missing_count + $extra)) 
-		/ ($ga + $extra);
-	} elsif ($smoothing eq 'product') {
-	    my $extra = $D[$n] * $missing_count;
-	    $pb = ($gb + $px * ($missing_count + $extra)) 
-		/ ($ga + $extra);
-	} elsif ($smoothing eq 'baseline') {
-	    $pb = $C[$n] * $px;
-	    $pb += (1 - $C[$n]) * ($gb / $gc)
-		if $gc > 0;
-	} else {
-	    die "Unknown smoothing $smoothing";
-	}
-
-    } elsif ($missing_count == 0) {
-#	    warn "Warning: Zero missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
-	$pb = ($gb + $px) / ($ga + 1);
-
-    } elsif ($missing_count < 0) {
-
+    } elsif ($smoothing eq 'linear' or $smoothing eq 'product') {
+	if ($missing_count > 0) { # apply our smoothing formula
+	    if ($smoothing eq 'linear') {
+		my $extra = $A[$n] * $missing_count + exp10($B[$n] - 1.0); # want 0 when b=0
+		$pb = ($gb + $px * ($missing_count + $extra)) 
+		    / ($ga + $extra);
+	    } elsif ($smoothing eq 'product') {
+		my $extra = $D[$n] * $missing_count;
+		$pb = ($gb + $px * ($missing_count + $extra)) 
+		    / ($ga + $extra);
+	    }
+	} elsif ($missing_count == 0) {
+	    #warn "Warning: Zero missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
+	    $pb = ($gb + $px) / ($ga + 1);
+	    
+	} elsif ($missing_count < 0) {
+		
 # This is a bug in gngram.  This means there are more instances of
 # words following "A" than there are instances of "A" by itself.
+		
+	    warn "Warning: Negative missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
+	    $pb = ($gb + $px) / ($gc + 1);
+	}
+    } elsif ($smoothing eq 'baseline') {
+	$pb = $C[$n] * $px;
+	$pb += (1 - $C[$n]) * ($gb / $gc)
+	    if $gc > 0;
+    } elsif ($smoothing eq 'cdiscount') {
+	my $D = 40 * $E[$n];
+ 	if ($ga == 0) {
+ 	    $pb = $px;
+ 	} elsif ($gb == 0) {
+ 	    $pb = $px * ($D * n1($c) + $missing_count) / $ga;
+ 	} else {
+ 	    $gb -= $D;
+ 	    $pb = $gb / $ga;
+ 	    $pb += $px * ($D * n1($c) + $missing_count) / $ga;
+ 	}
 
-	warn "Warning: Negative missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
-	$pb = ($gb + $px) / ($gc + 1);
+# The following gives horrible results
+# It seems important to take mc into account
+
+# 	if ($gc == 0) {
+# 	    $pb = $px;
+# 	} elsif ($gb == 0) {
+# 	    $pb = $px * ($D * n1($c)) / $gc;
+# 	} else {
+#  	    $gb -= $D;
+#  	    $pb = $gb / $gc;
+#  	    $pb += $px * ($D * n1($c)) / $gc;
+# 	}
+
+    } else {
+	die "Unknown smoothing $smoothing";
     }
     return ($pb > 0 ? -log2($pb) : $infinity);
 }
