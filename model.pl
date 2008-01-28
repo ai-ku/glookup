@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.9 2008/01/26 22:53:23 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.10 2008/01/28 10:56:44 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -26,12 +26,10 @@ my $cachefile;
 my $ngram = 5;
 my $random = 0;
 my $zeroes = 0;
-# smoothing = { linear, product, baseline, kn }
-my $smoothing = 'product';
-my @A = (undef, undef, 6.8428534, 5.6275321, 5.8666798, 6.2342418); # linear: 8.047520370201 on brown.gtok.nounk
-my @B = (undef, undef, 0, 1.6448876, 2.2885119, 2.226181); # linear
+# smoothing = { mc, baseline, kn, cdiscount }
+my $smoothing = 'mc';
 my @C = (undef, undef, 0.12264181, 0.48531058, 0.73285371, 0.8485226); # baseline: 8.20830869973577
-my @D = (undef, undef, 6.8440119, 5.6305746, 5.9277921, 6.3675802); # product: 8.0477965326711
+my @D = (undef, undef, 7.8440119, 6.6305746, 6.9277921, 7.3675802); # mc: 8.0477965326711
 my @KN = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # kn: 8.23974660099736
 my @E = (undef, undef, 0.58301752, 0.79111861, 0.92800359, 0.9840277); # cdiscount: 
 
@@ -46,14 +44,6 @@ GetOptions('cache=s' => \$cachefile,
            'zeroes' => \$zeroes,
 	   'ngram=i' => \$ngram,
            'smoothing=s' => \$smoothing,
- 	   'a2=f' => \$A[2],
- 	   'a3=f' => \$A[3],
- 	   'a4=f' => \$A[4],
-	   'a5=f' => \$A[5],
- 	   'b2=f' => \$B[2],
- 	   'b3=f' => \$B[3],
- 	   'b4=f' => \$B[4],
- 	   'b5=f' => \$B[5],
  	   'c2=f' => \$C[2],
  	   'c3=f' => \$C[3],
  	   'c4=f' => \$C[4],
@@ -66,10 +56,14 @@ GetOptions('cache=s' => \$cachefile,
 	   'kn3=f' => \$KN[3],
 	   'kn4=f' => \$KN[4],
 	   'kn5=f' => \$KN[5],
+ 	   'e2=f' => \$E[2],
+ 	   'e3=f' => \$E[3],
+ 	   'e4=f' => \$E[4],
+ 	   'e5=f' => \$E[5],
 );
 
-my %init_fn = ('linear' => \&init_linear, 'product' => \&init_product, 'baseline' => \&init_baseline, 'kn' => \&init_kn, 'cdiscount' => \&init_cdiscount);
-my %score_fn = ('linear' => \&score_linear, 'product' => \&score_product, 'baseline' => \&score_baseline, 'kn' => \&score_kn, 'cdiscount' => \&score_cdiscount);
+my %init_fn = ('mc' => \&init_mc, 'baseline' => \&init_baseline, 'kn' => \&init_kn, 'cdiscount' => \&init_cdiscount);
+my %score_fn = ('mc' => \&score_mc, 'baseline' => \&score_baseline, 'kn' => \&score_kn, 'cdiscount' => \&score_cdiscount);
 
 # Main:
 
@@ -122,25 +116,7 @@ sub ngram {
     return $avgbits;
 }
 
-sub init_linear {
-    my $init;
-    my $ndims = 2 * $ngram - 2;
-    if ($zeroes) {
-	$init = zeroes($ndims);
-    } elsif ($random) {
-	$init = 10 * random($ndims);
-    } else {
-	my @x;
-	for (my $i = 2; $i <= $ngram; $i++) {
-	    $x[2 * $i - 4] = $A[$i];
-	    $x[2 * $i - 3] = $B[$i];
-	}
-	$init = pdl(@x);
-    }
-    return $init;
-}
-
-sub init_product {
+sub init_mc {
     my $init;
     my $ndims = $ngram - 1;
     $init = $zeroes ? zeroes($ndims) 
@@ -193,19 +169,7 @@ sub score {
     }
 }
 
-sub score_linear {			
-    my $x = shift;
-    $nscore++;
-    for (my $i = 2; $i <= $ngram; $i++) {
-	$A[$i] = nonnegative($x->at(2 * $i - 4));
-	$B[$i] = nonnegative($x->at(2 * $i - 3));
-    }
-    my $bits = ngram();
-    warn "score[$nscore]: $bits $x\n";
-    return $bits;
-}
-
-sub score_product {			
+sub score_mc {			
     my $x = shift;
     $nscore++;
     for (my $i = 2; $i <= $ngram; $i++) {
@@ -372,28 +336,22 @@ sub bits {
     if ($bad_context) {
 	$pb = $px;
 
-    } elsif ($smoothing eq 'linear' or $smoothing eq 'product') {
+    } elsif ($smoothing eq 'mc') {
 	if ($missing_count > 0) { # apply our smoothing formula
-	    if ($smoothing eq 'linear') {
-		my $extra = $A[$n] * $missing_count + exp10($B[$n] - 1.0); # want 0 when b=0
-		$pb = ($gb + $px * ($missing_count + $extra)) 
-		    / ($ga + $extra);
-	    } elsif ($smoothing eq 'product') {
-		my $extra = $D[$n] * $missing_count;
-		$pb = ($gb + $px * ($missing_count + $extra)) 
-		    / ($ga + $extra);
-	    }
+	    my $extra = $D[$n] * $missing_count;
+	    $pb = ($gb + $px * $extra)
+		/ ($gc + $extra);
 	} elsif ($missing_count == 0) {
 	    #warn "Warning: Zero missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
-	    $pb = ($gb + $px) / ($ga + 1);
+	    $pb = ($gb + $px) / ($gc + 1);
 	    
 	} elsif ($missing_count < 0) {
 		
 # This is a bug in gngram.  This means there are more instances of
 # words following "A" than there are instances of "A" by itself.
 		
-	    warn "Warning: Negative missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
-	    $pb = ($gb + $px) / ($gc + 1);
+	    die "Error: Negative missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
+	    #$pb = ($gb + $px) / ($gc + 1);
 	}
     } elsif ($smoothing eq 'baseline') {
 	$pb = $C[$n] * $px;
