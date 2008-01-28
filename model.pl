@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.12 2008/01/28 11:50:34 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.13 2008/01/28 13:53:53 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -33,6 +33,7 @@ my @D = (undef, undef, 7.8440119, 6.6305746, 6.9277921, 7.3675802); # mc: 8.0477
 my @KN = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # kn: 8.23974660099736
 my @E = (undef, undef, 0.58301752, 0.79111861, 0.92800359, 0.9840277); # cdiscount: 
 my @KNMC = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # knmc: 
+my @KNMOD = (0.023897441, 0.83456664, 0.95823375, 0.77699565, 0.99997913, 0.96603625, 0.99995615, 0.99999726); # knmod: 8.01646443686864
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
@@ -72,6 +73,7 @@ my %init_fn =
      'kn' => \&init_kn, 
      'cdiscount' => \&init_cdiscount, 
      'knmc' => \&init_knmc,
+     'knmod' => \&init_knmod,
      );
 my %score_fn = 
     ('mc' => \&score_mc, 
@@ -79,6 +81,7 @@ my %score_fn =
      'kn' => \&score_kn, 
      'cdiscount' => \&score_cdiscount,
      'knmc' => \&score_knmc,
+     'knmod' => \&score_knmod,
      );
 
 # Main:
@@ -177,6 +180,15 @@ sub init_knmc {
     return $init;
 }
 
+sub init_knmod {
+    my $init;
+    my $ndims = 2 * $ngram - 2;
+    $init = $zeroes ? ones($ndims) 
+	: $random ? random($ndims)
+	: pdl(@KNMOD[0 .. $ndims-1]);
+    return $init;
+}
+
 sub score {
     my $x = shift;
 #    warn "score($x)\n";
@@ -255,6 +267,20 @@ sub score_knmc {
     return $bits;
 }
 
+sub score_knmod {			
+    my $x = shift;
+    $nscore++;
+    for (my $i = 0; $i < $x->nelem; $i++) {
+	if ($x->at($i) < 0 or $x->at($i) > 1) {
+	    return $infinity;
+	}
+	$KNMOD[$i] = $x->at($i);
+    }
+    my $bits = ngram();
+    warn "score[$nscore]: $bits $x\n";
+    return $bits;
+}
+
 sub nonnegative {
     my $x = shift;
     $x >= 0 ? $x : 0;
@@ -316,7 +342,7 @@ sub read_corpus {
 sub bits {
     my ($s, $i, $n) = @_;
     $n = 5 if not defined $n;
-    if ($smoothing eq 'kn' or $smoothing eq 'knmc') {
+    if ($smoothing =~ /^kn/) {
 	my $pb = kn($s, $i, $n);
 	die "Kneser-Ney returned $pb" if $pb <= 0;
 	return -log2($pb);
@@ -331,6 +357,8 @@ sub bits {
 
 	# die "Unknown word [$s->[$i]]" if $g == 0;
 	$g = 100 if $g == 0;
+
+	warn "p0($s->[$i],$i,$n): $g/$GTotal=".($g/$GTotal)."\n" if $debug;
 
 	return log2($GTotal / $g);
     } elsif ($n > $i + 1) {
@@ -377,22 +405,13 @@ sub bits {
 	$pb = $px;
 
     } elsif ($smoothing eq 'mc') {
-	if ($missing_count > 0) { # apply our smoothing formula
-	    my $extra = $D[$n] * $missing_count;
-	    $pb = ($gb + $px * $extra)
-		/ ($gc + $extra);
-	} elsif ($missing_count == 0) {
-	    #warn "Warning: Zero missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
-	    $pb = ($gb + $px) / ($gc + 1);
-	    
-	} elsif ($missing_count < 0) {
-		
-# This is a bug in gngram.  This means there are more instances of
-# words following "A" than there are instances of "A" by itself.
-		
-	    die "Error: Negative missing_count [$b] ga=$ga gb=$gb gc=$gc\n";
-	    #$pb = ($gb + $px) / ($gc + 1);
-	}
+	warn "mc($s->[$i],$i,$n): ML=$gb/$gc=".($gc>0?$gb/$gc:0)."\n" if $debug;
+	my $extra = $D[$n] * $missing_count;
+	$extra = 1 if $extra == 0;
+	warn "mc($s->[$i],$i,$n): mc=$missing_count x D=$D[$n] = $extra\n" if $debug;
+	$pb = ($gb + $px * $extra)
+	    / ($gc + $extra);
+	warn "mc($s->[$i],$i,$n): (nxy=$gb + px=$px * $extra) / (nx_=$gc + $extra) = $pb\n" if $debug;
     } elsif ($smoothing eq 'baseline') {
 	$pb = $C[$n] * $px;
 	$pb += (1 - $C[$n]) * ($gb / $gc)
@@ -480,6 +499,8 @@ sub kn {
 	# die "Unknown word [$s->[$i]]" if $g == 0;
 	$g = 100 if $g == 0;
 
+	warn "kn($s->[$i],$i,$n): $g/$GTotal=".($g/$GTotal)."\n" if $debug;
+
 	return $g / $GTotal;
 	
     } elsif ($n > 5) {
@@ -493,28 +514,36 @@ sub kn {
     $nx = n0($x);
     $nx_ = n0($x . ' _');
     $mc = $nx - $nx_;
-    warn("kn($s->[$i],$i,$n): nx_ = $nx_\n") if $debug;
     if ($nx == 0) {
+	warn("kn($s->[$i],$i,$n): nx=0 for [$x]\n") if $debug;
 	return kn($s, $i, $n-1);
     } elsif ((" $x " =~ / [;!?.] /)
 	     and not ($x =~ /^[^;!?.]*[;!?.]$/ and $s->[$i] eq '</S>'))
     { # bad context
+	warn("kn($s->[$i],$i,$n): nx=$nx nx_=$nx_ bad [$x]\n") if $debug;
 	return kn($s, $i, $n-1);
     }	
-    $n1x_ = n1("$x _");
-    warn("kn($s->[$i],$i,$n): n1x_ = $n1x_\n") if $debug;
+    my $kn0 = ($smoothing eq 'kn') ? kn0($s, $i, $n-1) : 
+	($smoothing eq 'knmc') ? kn1($s, $i, $n-1) :
+	($smoothing eq 'knmod') ? kn2($s, $i, $n-1) :
+	die "KN: Unknown smoothing $smoothing";
+    warn("kn($s->[$i],$i,$n): kn0 = $kn0\n") if $debug;
+
     $nxy = n0("$x $s->[$i]");
-    warn("kn($s->[$i],$i,$n): nxy = $nxy\n") if $debug;
-    $D = $MINNGRAM * $KN[2*$n-4];
+    warn("kn($s->[$i],$i,$n): ML: nxy = $nxy / nx = $nx => ".($nxy/$nx)."\n") if $debug;
+    warn("kn($s->[$i],$i,$n): nx=$nx nx_=$nx_ mc=$mc\n") if $debug;
+    $D = $MINNGRAM * 
+	(($smoothing eq 'kn') ? $KN[2*$n-4] :
+	 ($smoothing eq 'knmc') ? $KNMC[2*$n-4] :
+	 ($smoothing eq 'knmod') ? $KNMOD[2*$n-3] :
+	 die "Bad smoothing [$smoothing]");
     warn("kn($s->[$i],$i,$n): D = $D\n") if $debug;
     $nxy -= $D if $nxy > 0;
 
+    $n1x_ = n1("$x _");
+    warn("kn($s->[$i],$i,$n): n1x_ = $n1x_\n") if $debug;
     warn("kn($s->[$i],$i,$n): x = [$x] nx = $nx\n") if $debug;
     warn("kn($s->[$i],$i,$n): mc = $mc\n") if $debug;
-    my $kn0 = ($smoothing eq 'kn') ? kn0($s, $i, $n-1) : 
-	($smoothing eq 'knmc') ? kn1($s, $i, $n-1) :
-	die "KN: Unknown smoothing $smoothing";
-    warn("kn($s->[$i],$i,$n): kn0 = $kn0\n") if $debug;
 
     $kn = $nxy / $nx + (($mc + $n1x_ * $D) / $nx) * $kn0;
 
@@ -528,7 +557,6 @@ sub kn {
 
 sub kn0 {
     my ($s, $i, $n) = @_;
-    warn("kn0($s->[$i],$i,$n): hello\n") if $debug;
     my ($x, $n1_xy, $n1_x_, $D, $kn0);
     if ($n < 0) {
 	die "Bad n [$n]";
@@ -543,29 +571,33 @@ sub kn0 {
 	    $n1_y = 1;
 	}
 	my $n1__ = n1('_ _');
-	warn("kn0($s->[$i],$i,$n): n1_y=$n1_y n1__=$n1__\n") if $debug;
+	warn("kn0($s->[$i],$i,$n): n1_y=$n1_y / n1__=$n1__ => ".($n1_y/$n1__)."\n") if $debug;
 	return $n1_y / $n1__;
     }
     die if $n <= 1;
     $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
     $n1_x_ = n1("_ $x _");
-    warn("kn0($s->[$i],$i,$n): n1_x_ = $n1_x_\n") if $debug;
     if ($n1_x_ == 0) {
+	warn("kn0($s->[$i],$i,$n): n1_x_ = $n1_x_\n") if $debug;
 	return kn0($s, $i, $n-1);
     } elsif ((" $x " =~ / [;!?.] /)
 	     and not ($x =~ /^[^;!?.]*[;!?.]$/ and $s->[$i] eq '</S>'))
     { # bad context
+	warn("kn0($s->[$i],$i,$n): n1_x_ = $n1_x_ bad x=[$x]\n") if $debug;
 	return kn0($s, $i, $n-1);
     }	
     die "KN0 zero denominator [$x]" if $n1_x_ == 0;
+    my $px = kn0($s, $i, $n-1);
+
     $n1_xy = n1("_ $x $s->[$i]");
-    warn("kn0($s->[$i],$i,$n): n1_xy = $n1_xy\n") if $debug;
+    warn("kn0($s->[$i],$i,$n): ML: n1_xy = $n1_xy / n1_x_ = $n1_x_ => ".($n1_xy/$n1_x_)."\n") if $debug;
     $D = $KN[2*$n-3];
     warn("kn0($s->[$i],$i,$n): D = $D\n") if $debug;
     $n1_xy -= $D if $n1_xy > 0;
     my $n2_x_ = n2("_ $x _");
+    warn("kn0($s->[$i],$i,$n): n2_x_ = $n2_x_\n") if $debug;
 #    $kn0 = $n1_xy / $n1_x_ + ($n1x_ * $D / $n1_x_) * kn0($s, $i, $n-1);	#BUGGY
-    $kn0 = $n1_xy / $n1_x_ + ($n2_x_ * $D / $n1_x_) * kn0($s, $i, $n-1);
+    $kn0 = $n1_xy / $n1_x_ + ($n2_x_ * $D / $n1_x_) * $px;
 
     # new formula: does not really work
 #     my $n1x = myngram($x);
@@ -621,6 +653,56 @@ sub kn1 {
 
     warn("kn1($s->[$i],$i,$n): kn1 = $kn1\n") if $debug;
     return $kn1;
+}
+
+sub kn2 {
+    my ($s, $i, $n) = @_;
+    if ($n <= 0) {
+	die "Bad n [$n]";
+    } elsif ($n == 1) {
+	my $n1_y = n1("_ $s->[$i]") + n0($s->[$i]) - n0("_ $s->[$i]");
+	if ($n1_y == 0) {
+	    warn("kn2($s->[$i],$i,$n): n1_y($s->[$i]) == 0\n") if $debug;
+	    # BUG: verify that this is exactly what would happen if we smoothed with a 0-order 1/V model
+	    $n1_y = 1;
+	}
+	my $n1__ = n1('_ _') + n0('_') - n0('_ _');
+
+	# BUG: OK, let's not use the extension here:
+	$n1_y = (n1("_ $s->[$i]") or 1);
+	$n1__ = n1("_ _");
+
+	warn("kn2($s->[$i],$i,$n): n1_y=$n1_y / n1__=$n1__ => ".($n1_y/$n1__)."\n") if $debug;
+	return $n1_y / $n1__;
+    }
+    my $corr = ($KNMOD[0] + 1)/($KNMOD[0] + 40);
+
+    my $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
+    my $n1_x_ = n1("_ $x _") + $corr * (n0("$x _") - n0("_ $x _"));
+    if ($n1_x_ == 0) {
+	warn("kn2($s->[$i],$i,$n): n1_x_ = $n1_x_\n") if $debug;
+	return kn2($s, $i, $n-1);
+    } elsif ((" $x " =~ / [;!?.] /)
+	     and not ($x =~ /^[^;!?.]*[;!?.]$/ and $s->[$i] eq '</S>'))
+    { # bad context
+	warn("kn2($s->[$i],$i,$n): n1_x_ = $n1_x_ bad [$x]\n") if $debug;
+	return kn2($s, $i, $n-1);
+    }	
+    my $px = kn2($s, $i, $n-1);
+    my $n1_xy = n1("_ $x $s->[$i]") + $corr * (n0("$x $s->[$i]") - n0("_ $x $s->[$i]"));
+    die "n1_xy=$n1_xy" if ($n1_xy > 0 and $n1_xy < 1);
+    warn("kn2($s->[$i],$i,$n): ML: n1_xy = $n1_xy / n1_x_ = $n1_x_ => ".($n1_xy/$n1_x_)."\n") if $debug;
+    my $D = $KNMOD[2*$n-2];
+    warn("kn2($s->[$i],$i,$n): D = $D\n") if $debug;
+    $n1_xy -= $D if $n1_xy > 0;
+
+    my $n1x_ = n1("$x _");
+    warn("kn2($s->[$i],$i,$n): n1x_ = $n1x_\n") if $debug;
+
+    my $kn2 = $n1_xy / $n1_x_ + $px * $D * $n1x_ / $n1_x_;
+
+    warn("kn2($s->[$i],$i,$n): kn2 = $kn2\n") if $debug;
+    return $kn2;
 }
 
 
