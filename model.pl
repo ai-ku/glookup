@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.11 2008/01/28 11:06:33 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.12 2008/01/28 11:50:34 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -26,7 +26,7 @@ my $cachefile;
 my $ngram = 5;
 my $random = 0;
 my $zeroes = 0;
-# smoothing = { mc, baseline, kn, cdiscount, knmc }
+# smoothing = { mc, baseline, kn, cdiscount, knmc, wbdiscount }
 my $smoothing = 'mc';
 my @C = (undef, undef, 0.12264181, 0.48531058, 0.73285371, 0.8485226); # baseline: 8.20830869973577
 my @D = (undef, undef, 7.8440119, 6.6305746, 6.9277921, 7.3675802); # mc: 8.0477965326711
@@ -352,6 +352,7 @@ sub bits {
     my $gc = n0($c);	# gc = count of c
     my $missing_count = $ga - $gc; # missing_count = occurances of (a) 
     #   that are missing from ngram data
+    die "Negative missing count" if $missing_count < 0;
     my $pb;
 
 # If there is no missing count, surprizingly it is better to ignore
@@ -420,6 +421,31 @@ sub bits {
 #  	    $pb = $gb / $gc;
 #  	    $pb += $px * ($D * n1($c)) / $gc;
 # 	}
+
+    } elsif ($smoothing eq 'wbdiscount') {
+
+# This one gave 8.5773 on the 1k data:
+# 	if ($missing_count > 0) {
+# 	    $pb = (1 - $missing_count/$ga) * ($gb/$ga) + ($missing_count/$ga) * $px;
+# 	} else {
+# 	    $pb = (1 - 1/$ga) * ($gb/$ga) + (1/$ga) * $px;
+# 	}
+
+# This one gives 11.9696
+# 	my $n1c = n1($c);
+# 	my $bow = $n1c/($n1c+$ga);
+# 	$bow = 1 if $bow == 0;
+# 	$pb = (1-$bow) * ($gb/$ga) + $bow * $px;
+
+# This one gives 7.9996: it is equivalent to mc if we ignore n1($c)
+ 	if ($gc == 0) {
+ 	    $pb = $px;
+ 	} else {
+ 	    my $n1c = n1($c) + 7*($ga - $gc);
+ 	    my $bow = $n1c/($n1c+$gc);
+ 	    die "WB: bow=0" if $bow == 0;
+ 	    $pb = (1-$bow) * ($gb/$gc) + $bow * $px;
+ 	}
 
     } else {
 	die "Unknown smoothing $smoothing";
