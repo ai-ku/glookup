@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.14 2008/01/28 20:00:09 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.15 2008/01/28 22:17:32 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -33,7 +33,7 @@ my @D = (undef, undef, 7.8440119, 6.6305746, 6.9277921, 7.3675802); # mc: 8.0477
 my @KN = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # kn: 8.23974660099736
 my @E = (undef, undef, 0.58301752, 0.79111861, 0.92800359, 0.9840277); # cdiscount: 
 my @KNMC = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # knmc: 
-my @KNMOD = (0.020651198, 0.95575279, 1, 1, 3.1924666, 3.2104354, 4.8812996, 6.8345437); # knmod: 7.96264623252661
+my @KNMOD = (0.34999882, 0.058431153, 0.3384098, 0.71771877, 3.1924666, 3.0841902, 3.838957, 4.1892848); # 1k: 7.8232
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
@@ -272,8 +272,7 @@ sub score_knmod {
     $nscore++;
     for (my $i = 0; $i < $x->nelem; $i++) {
 	my $xi = $x->at($i);
-	if (($xi < 0) ||
-	    (($i >= 1) && ($i <= 3) && ($xi > 1))) {
+	if ($xi < 0) {
 	    return $infinity;
 	}
 	$KNMOD[$i] = $xi;
@@ -409,6 +408,7 @@ sub bits {
     } elsif ($smoothing =~ /^mc/) {
 	warn "mc($s->[$i],$i,$n): ML=$gb/$gc=".($gc>0?$gb/$gc:0)."\n" if $debug;
 	my $extra = $D[$n] * $missing_count;
+#	my $extra = $D[$n] * $gc;
 	$extra = 1 if $extra == 0;
 	warn "mc($s->[$i],$i,$n): mc=$missing_count x D=$D[$n] = $extra\n" if $debug;
 	if ($smoothing eq 'mcmod') {
@@ -715,12 +715,14 @@ sub kn2 {
     warn("kn2($y,$i,$n): ML: n1_xy = $n1_xy / n1_x_ = $n1_x_ => ".($n1_xy/$n1_x_)."\n") if $debug;
     my $D = $KNMOD[$n-1];
     warn("kn2($y,$i,$n): D = $D\n") if $debug;
+    $D = 1;
     $n1_xy -= $D if $n1_xy > 0;
 
     my $n1x_ = n1("$x _");
     warn("kn2($y,$i,$n): n1x_ = $n1x_\n") if $debug;
 
-    my $kn2 = ($n1_xy + $p0 * $D * $n1x_) / $n1_x_;
+    my $C = $KNMOD[$n-1];
+    my $kn2 = ($n1_xy + $p0 * ($C * $n1_x_ + $D * $n1x_)) / ($C * $n1_x_ + $n1_x_);
 
     warn("kn2($y,$i,$n): kn2 = $kn2\n") if $debug;
     return $kn2;
@@ -837,7 +839,8 @@ sub dhc {
     $fxv = 1E10;
 
     printf("%d. %.12g <= ", ++$count, $fx);
-    for($i=0; $i<$NDIM; $i++) { printf("%.12g ", $x[$i]); }; printf("\n");
+    for($i=0; $i<$NDIM; $i++) { printf("%.12g ", $x[$i]); }; 
+    printf("ssize=$vr\n");
 
     while(abs($vr) >= $THRESHOLD) {
 	$maxiter = ((abs($vr) < 2*$THRESHOLD) ? 2*$NDIM : 2);
