@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.8 2008/01/26 21:36:20 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.9 2008/01/26 22:53:23 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -10,6 +10,9 @@ require 'gtokenize.pl';
 my $log2 = log(2);
 sub log2 { log($_[0])/$log2; }
 sub exp2 { exp($_[0]*$log2); }
+my $log10 = log(10);
+#sub log10 { log($_[0])/$log10; } # defined in PDL
+sub exp10 { exp($_[0]*$log10); }
 
 # Command line options:
 
@@ -17,6 +20,7 @@ my $verbose = 0;
 my $debug = 0;
 my $optimize = 0;
 my $dhc = 0;
+my $simplex = 0;
 my $patterns;			# output patterns
 my $cachefile;
 my $ngram = 5;
@@ -24,20 +28,19 @@ my $random = 0;
 my $zeroes = 0;
 # smoothing = { linear, product, baseline, kn }
 my $smoothing = 'product';
-my @A = (undef, undef, 6.3712181,  6.2403967, 6.2855943,  5.375136); # 8.06058787993131
-my @B = (undef, undef, 0.00,       0.00,      2.4973338,  2.457501); 
-my @C = (undef, undef, 0.12244049, 0.4886369, 0.74636033, 0.83561995); # 8.22092294839358
-my @D = (undef, undef, 6.7131229,  5.9414447, 6.5528203,  5.7060572); # 8.06083590891475
-my @E = (undef, undef, 0.50813193, 0.798793, 0.92605047, 0.98232709); # 8.30401190127916
-#my @KN = (0.78825346, 1.8085538, 1.7059951, 3.1911228, 3.9578511, 5.4777073, 5.1142141); # 8.25784993465366 after fix; 7.8096796782004 before fix
-#my @KN = (0.18477542, 1.2406021, 1.3108472, 2.1149741, 2.4422168, 3.5026924, 1.9153686); # 8.25372770020088 reoptimized after fix
-my @KN = (0.5460628731330993, 0.775668801099801, 0.7876548885616731, 0.8923500856395791, 0.9199904141525053, 0.970764279164452, 0.8716210816939955); # reverted to regular coeff, previously we had to do 1/(1+exp(-KN[i])).  now it is just KN[i].
+my @A = (undef, undef, 6.8428534, 5.6275321, 5.8666798, 6.2342418); # linear: 8.047520370201 on brown.gtok.nounk
+my @B = (undef, undef, 0, 1.6448876, 2.2885119, 2.226181); # linear
+my @C = (undef, undef, 0.12264181, 0.48531058, 0.73285371, 0.8485226); # baseline: 8.20830869973577
+my @D = (undef, undef, 6.8440119, 5.6305746, 5.9277921, 6.3675802); # product: 8.0477965326711
+my @KN = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # kn: 8.23974660099736
+my @E = (undef, undef, 0.58301752, 0.79111861, 0.92800359, 0.9840277); # cdiscount: 
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
            'debug' => \$debug,
            'optimize' => \$optimize,
 	   'dhc' => \$dhc,
+	   'simplex' => \$simplex,
 	   'patterns' => \$patterns,
            'random' => \$random,
            'zeroes' => \$zeroes,
@@ -98,12 +101,12 @@ sub optimize {
     my $initsize = 1.0;
     my $minsize = 1E-4;
     my $maxiter = 1E6;
-    if ($dhc) {
-	my ($optimum, $final) = dhc(\&score, $init);
-	warn "$optimum <= $final\n";
-    } else {
+    if ($simplex) {
 	my ($optimum, $ssize) = simplex($init, $initsize, $minsize,
 					$maxiter, \&score, \&display);
+    } else {			# dhc is the default
+	my ($optimum, $final) = dhc(\&score, $init);
+	warn "$optimum <= $final\n";
     }
 }
 
@@ -167,8 +170,8 @@ sub init_cdiscount {
 sub init_kn {
     my $init;
     my $ndims = 2 * $ngram - 3;
-    $init = $zeroes ? zeroes($ndims) 
-	: $random ? log(1/random($ndims)-1)
+    $init = $zeroes ? ones($ndims) 
+	: $random ? random($ndims)
 	: pdl(@KN[0 .. $ndims-1]);
     return $init;
 }
