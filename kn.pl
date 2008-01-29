@@ -1,13 +1,27 @@
 #!/usr/bin/perl -w
 use strict;
-warn q{$Id: kn.pl,v 1.4 2007/12/02 10:37:48 dyuret Exp dyuret $ }."\n";
+warn q{$Id: kn.pl,v 1.5 2008/01/06 12:30:26 dyuret Exp dyuret $ }."\n";
 my $DEBUG = 0;
+my $ANY = '_';
+my $NGRAM = 5;
+my $MINNGRAM = 40;
+
+# The following parameters have been optimized on the Brown corpus:
+
+my @KNMOD = 			# knmod: 1k=7.80248865053247 full=7.85466149603376
+    (
+     1.4351794, 		# coef=(A+1)/(A+40) for kn2 (7.8536 if 0)
+     1.3009039, 2.0350656, 2.4501021, # C2..C4 (x n1modx_) for kn2; D=1 for kn2 (8.0358 if 0)
+     3.0263603, 2.9146123, 3.1023827, 3.5312749, # C2..C5 (x mc) for kn (8.8599 if 0)
+     0.17869642, 3.3607215e-05, 0.23590772, 0.22686745 # D2..D5 (x40) for kn (7.8035 if 0)
+     );
 
 # TODO:
 # - test using backoff vs regular counts when context has zero count
 # - do something better about oov words
 # - test the kn discount coefficient estimates given in paper
 # - test using n0x vs n0x_
+# - test using always modified counts.
 
 # kn(s,i,n): returns the probability of the i'th word in sentence s
 # according to an n-gram model.  n defaults to 5.  The first token in
@@ -61,14 +75,6 @@ sub kn_init {
     close(FP);
 }
 
-# The following parameters have been optimized on the Brown corpus:
-
-my @D40 = ( undef, undef, 28.11096928644257128068, 33.98733562666299928484, 39.16948427744310745367, 39.81172633310000762000 );
-my @D1 = ( undef, undef, .85948550385118495566, .96034527604501211555, .99565930386648919162, undef );
-
-my $ANY = '_';
-my $NGRAM = 5;
-
 sub kn {
     my ($s, $i, $n) = @_;
     $n = $NGRAM if not defined $n;
@@ -109,6 +115,7 @@ sub kn {
 	}
 	my $n_ = kn0($ANY);
 	$p = $ny / $n_;
+	warn "kn($s->[$i],$i,$n): $ny/$n_=$p\n" if $DEBUG;
 
     } else {
 
@@ -116,7 +123,10 @@ sub kn {
 
 	my $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
 	my $n0x_ = kn0("$x _");
-	if (($n0x_ == 0)
+	my $n0x  = kn0($x);
+	my $mc = $n0x - $n0x_;
+	# BUG: we should take n0x_ here or divide by n0x down below.
+	if (($n0x == 0)
 	    # Backoff when context count is zero
 	    # BUG: instead of backing off here, we should try using the
 	    # <UNK> token for unknown words in context.
@@ -133,6 +143,8 @@ sub kn {
 	    # counts when backing off because of a zero context.
 	    $p = kn($s, $i, $n-1); 
 
+	    warn("kn($s->[$i],$i,$n): nx=$n0x nx_=$n0x_ skip [$x]\n") if $DEBUG;
+
 	    # This is the srilm implementation, always use the
 	    # modified context when backing off.
 	    # my $p = kn_backoff($s, $i, $n-1); 
@@ -140,14 +152,20 @@ sub kn {
 	    return $p if %kn0;
 	}
 
+	my $p0 = kn_backoff($s, $i, $n-1);
+	warn("kn($s->[$i],$i,$n): kn0 = $p0\n") if $DEBUG;
+
 	# First approximation
 
 	my $n0xy = kn0("$x $s->[$i]");
-	warn "kn[$n][0]=$n0xy/$n0x_=" .($n0xy/$n0x_)."\n" if $DEBUG;
-	my $D = $D40[$n];   # parameter to subtract from the n0xy count
+	warn("kn($s->[$i],$i,$n): ML: nxy = $n0xy / nx = $n0x => ".($n0xy/$n0x)."\n") if $DEBUG;
+	warn("kn($s->[$i],$i,$n): nx=$n0x nx_=$n0x_ mc=$mc\n") if $DEBUG;
+
+	my $D = $MINNGRAM * $KNMOD[$n+6];   # parameter to subtract from the n0xy count
+	warn("kn($s->[$i],$i,$n): D = $D\n") if $DEBUG;
 	$n0xy -= $D if $n0xy > 0;	# we only subtract if it is positive
-	$p = $n0xy / $n0x_;	# first approximation
-	warn "kn[$n][1]=($n0xy-$D)/$n0x_=$p\n" if $DEBUG;
+	# $p = $n0xy / $n0x_;	# first approximation
+	#warn "kn[$n][1]=($n0xy-$D)/$n0x_=$p\n" if $DEBUG;
 
 	# Implement Kneser-Ney smoothing
 
@@ -156,7 +174,16 @@ sub kn {
 	# the missing count from the D subtractions:
 
 	my $n1x_ = kn1("$x $ANY"); # number of distinct words following x
-	my $mc1 = $D * $n1x_;	# missing count from D subtractions
+	# my $mc1 = $D * $n1x_;	# missing count from D subtractions
+	warn("kn($s->[$i],$i,$n): n1x_ = $n1x_\n") if $DEBUG;
+	warn("kn($s->[$i],$i,$n): x = [$x] nx = $n0x\n") if $DEBUG;
+	warn("kn($s->[$i],$i,$n): mc = $mc\n") if $DEBUG;
+
+	# Do some more missing count discounting
+	my $extra = $KNMOD[$n+2] * $mc;
+	$extra = 1 if 0 == $extra;
+
+	$p = ($n0xy + $p0 * ($extra + $n1x_ * $D)) / ($n0x_ + $extra);
 
 	# DEPRECATED:
 	# By using n0x_ instead of n0x we do not need mc2 any more.
@@ -170,67 +197,73 @@ sub kn {
 
 	# Add the kn smoothing term:
 
-	$p += ($mc1 / $n0x_) * kn_backoff($s, $i, $n-1);
+	# $p += ($mc1 / $n0x_) * kn_backoff($s, $i, $n-1);
     }
 
-    warn "kn[$n]=$p\n" if $DEBUG;
+    warn("kn($s->[$i],$i,$n): kn = $p\n") if $DEBUG;
     return $p;
 }
 
 sub kn_backoff {
     my ($s, $i, $n) = @_;
+    my $y = $s->[$i];
+    my $coef = ($KNMOD[0] + 1)/($KNMOD[0] + 40);
     my $p;
 
     if ($n == 1) {
-	my $n1_y = kn1("$ANY $s->[$i]");
+	my $n1_y = kn1("$ANY $y");
 	if ($n1_y == 0) {
+	    warn("kn2($y,$i,$n): n1_y($y) == 0\n") if $DEBUG;
 	    # Making this 1 is exactly what would happen if we smoothed with a
 	    # 0-order 1/V model.  It is not probabilistically sound.
 	    $n1_y = 1;
 	}
 	my $n1__ = kn1("$ANY $ANY");
         $p = $n1_y / $n1__;
+	warn("kn2($y,$i,$n): n1_y=$n1_y / n1__=$n1__ => $p\n") if $DEBUG;
 
     } else {
 
+	my $p0 = kn_backoff($s, $i, $n-1);
+
 	my $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
-	my $n1_x_ = kn1("$ANY $x $ANY");
+	my $n1_x_ = kn1mod("$ANY $x $ANY", $coef);
 
 	# See if the context has non-zero count:
-	if ($n1_x_ == 0) {
+	if (($n1_x_ == 0)
+	    # Backoff when context count is zero
 	    # BUG: instead of backing off here, we should try using the
 	    # <UNK> token for unknown words in context.
-	    return kn_backoff($s, $i, $n-1);
+	    or ((" $x " =~ / [;!?.] /) and
+		not ($x =~ /^[^;!?.]*[;!?.]$/ and $s->[$i] eq '</S>'))
+	    # bad context: google data does not have any regular tokens
+	    # following these four characters.
+	    ) {
+	    warn("kn2($y,$i,$n): n1_x_ = $n1_x_ skip [$x]\n") if $DEBUG;
+	    return $p0;
 	}    
 
 	# First approximation
 
-	my $n1_xy = kn1("$ANY $x $s->[$i]");
-	my $D = $D1[$n];	# parameter to subtract
+	my $n1_xy = kn1mod("$ANY $x $y", $coef);
+	die "n1_xy=$n1_xy" if ($n1_xy > 0 and $n1_xy < 1);
+	warn("kn2($y,$i,$n): ML: n1_xy = $n1_xy / n1_x_ = $n1_x_ => ".($n1_xy/$n1_x_)."\n") if $DEBUG;
+
+	my $D = 1;	# parameter to subtract
+	warn("kn2($y,$i,$n): D = $D\n") if $DEBUG;
 	$n1_xy -= $D if $n1_xy > 0; # only subtract if positive count
-	$p = $n1_xy / $n1_x_;	# first approximation
-	warn "kn_backoff[$n][0]=$n1_xy/$n1_x_=$p\n" if $DEBUG;
+	# $p = $n1_xy / $n1_x_;	# first approximation
+	# warn "kn_backoff[$n][0]=$n1_xy/$n1_x_=$p\n" if $DEBUG;
 
-	# Implement Kneser-Ney smoothing
+	my $n1x_ = kn1("$x _");
+	warn("kn2($y,$i,$n): n1x_ = $n1x_\n") if $DEBUG;
+	my $C = $KNMOD[$n-1];
+	my $n1modx_ = kn1mod("$x _");
 
-	# Missing count: if we add up n1_xy for all y, the total will
-	# be less than n1_x_, and we will use the difference for
-	# smoothing.  The source of the missing count is the $D we
-	# subtract for each y with n1_xy > 0.  How many such y are
-	# there?  We can't use n1x_, because of the filtering of
-	# ngrams with counts less than 40, n1x_ is not equal to n2_x_.
-	# We can't use n1_x_ because that counts each axb for distinct
-	# a and b.  We need a special counter for the number of y with
-	# n1_xy > 0.  That is the n2_x_ count.
+	$p = ($n1_xy + $p0 * ($C * $n1modx_ + $D * $n1x_)) / ($C * $n1modx_ + $n1_x_);
 
-	my $n2_x_ = kn2("$ANY $x $ANY");
-	my $mc = $D * $n2_x_;
-
-	# Add the kn smoothing term:
-
-	$p += ($mc / $n1_x_) * kn_backoff($s, $i, $n-1);
     }
-    warn "kn_backoff[$n]=$p\n" if $DEBUG;
+    warn("kn2($y,$i,$n): kn2 = $p\n") if $DEBUG;
     return $p;
 }
 
@@ -292,6 +325,20 @@ sub kn2 {
     }
 }
 
+sub kn1mod {
+    my ($pat, $coef) = @_;
+    if (defined $coef) {
+	die "Bad n1mod coefficient $coef" if $coef < 1/40;
+    } else {
+	$coef = 1/40;
+    }
+    my $n1 = kn1($pat);
+    my $n0 = kn0($pat);
+    $pat =~ s/\s*_\s*//;
+    my $n0x = kn0($pat);
+    return $n1 + $coef * ($n0x - $n0);
+}
+
 use Data::Dumper;
 require "gtokenize.pl";
 
@@ -306,7 +353,7 @@ sub kn_test {
 	next unless /\S/;
 	$cnt{sentences}++;
 	my @s = ('<S>', gtokenize($_), '</S>');
-	for (my $i = 1; $i <= $#s; $i++) {
+	for (my $i = 1; $i < $#s; $i++) {
 	    $cnt{words}++;
 	    print $s[$i] if %kn0;
 	    print '?' if %kn0 and kn0($s[$i]) == 0;
@@ -322,9 +369,7 @@ sub kn_test {
 	}
     }
     close(FP);
-    if (not %kn0) {
-	print "$_\n" for keys %main::kn_patterns;
-    }
+    $cnt{entropy} = $cnt{bits} / $cnt{words};
     warn Dumper(\%cnt);
 }
 
