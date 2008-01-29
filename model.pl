@@ -1,12 +1,15 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.17 2008/01/29 06:20:24 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.18 2008/01/29 08:52:59 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
 use PDL;
 use PDL::Opt::Simplex;
+use Data::Dumper;
+
 my $oldfh = select(STDERR); $| = 1; select($oldfh);
 require 'gtokenize.pl';
+require 'fileio.pl';
 my $log2 = log(2);
 sub log2 { log($_[0])/$log2; }
 sub exp2 { exp($_[0]*$log2); }
@@ -26,9 +29,10 @@ my $cachefile;
 my $ngram = 5;
 my $random = 0;
 my $zeroes = 0;
-# smoothing = { mc, baseline, kn, cdiscount, knmc, wbdiscount }
+# smoothing = { mc, baseline, kn, cdiscount, knmc, wbdiscount, knmod }
 my $smoothing = 'knmod';
 my $string = '';
+my $verify = '';
 my @C = (undef, undef, 0.12264181, 0.48531058, 0.73285371, 0.8485226); # baseline: 8.20830869973577
 my @D = (undef, undef, 7.8440119, 6.6305746, 6.9277921, 7.3675802); # mc: 8.0477965326711
 my @KN = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # kn: 8.23974660099736
@@ -55,6 +59,7 @@ GetOptions('cache=s' => \$cachefile,
 	   'ngram=i' => \$ngram,
            'smoothing=s' => \$smoothing,
 	   'string=s' => \$string,
+	   'verify=s' => \$verify,
  	   'c2=f' => \$C[2],
  	   'c3=f' => \$C[3],
  	   'c4=f' => \$C[4],
@@ -100,7 +105,8 @@ die "Please specify -cache cntfile or -patterns to output patterns\n"
     if not $cachefile and not $patterns;
 my $ZERO_WARNING;
 my (%n0, %n1, %n2);
-my $GTotal = $patterns ? 1024908267229 : cnt_init($cachefile);
+cnt_init($cachefile) if $cachefile;
+my $GTotal = 1024908267229;
 warn "\ngtotal=$GTotal\n";
 my $nline = 0;
 my $nscore = 0;
@@ -117,6 +123,26 @@ if ($string) {
 	printf "\t%.4f", bits(\@s, $i, $n);
     }
     printf "\n";
+    exit;
+}
+
+if ($verify) {
+    my @vocab;
+    my @prob;
+    readfile('zcat vocab.gz|', sub { s/\t.*\n//; push @vocab, $_; });
+    my @s = split(' ', $verify);
+    my $i = $#s;
+    for my $w (@vocab) {
+	print $w;
+	$s[$i] = $w;
+	for (my $n = 1; $n <= $ngram; $n++) {
+	    my $p = exp2(-bits(\@s, $i, $n));
+	    $prob[$n-1] += $p;
+	    printf "\t%g", $p;
+	}
+	print "\n";
+    }
+    warn Dumper(\@prob);
     exit;
 }
 
@@ -351,6 +377,10 @@ sub process_sentence {
 	    }
 	    printf "\t%.4f\n", $b;
 	}
+# The unknown word hack
+#  	if (n0($s->[$i]) < 1000) {
+#  	    $s->[$i] = '<UNK>';
+#  	}
     }
     print "\n" if $verbose;
     return ($nbits, $nword);
@@ -545,7 +575,7 @@ sub kn {
     $nx = n0($x);
     $nx_ = n0($x . ' _');
     $mc = $nx - $nx_;
-    if ($nx == 0) {
+    if ($nx == 0) {		#DBG - this should be nx_
 	warn("kn($s->[$i],$i,$n): nx=0 for [$x]\n") if $debug;
 	return kn($s, $i, $n-1);
     } elsif ((" $x " =~ / [;!?.] /)
@@ -974,8 +1004,8 @@ sub n0 {
     my $pat = shift;
     if ($patterns) {
 	print "$pat\n" if 0 == $myngram{$pat}++;
-	return 1;
-    } elsif (defined $n0{$pat}) {
+    } 
+    if (defined $n0{$pat}) {
 	return $n0{$pat};
     } else {
 	warn "[$pat] some patterns not found, using zero\n" 
@@ -988,8 +1018,8 @@ sub n1 {
     my $pat = shift;
     if ($patterns) {
 	print "$pat\n" if 0 == $myngram{$pat}++;
-	return 1;
-    } elsif (defined $n1{$pat}) {
+    } 
+    if (defined $n1{$pat}) {
 	return $n1{$pat};
     } else {
 	warn "[$pat] some patterns not found, using zero\n" 
@@ -1002,8 +1032,8 @@ sub n2 {
     my $pat = shift;
     if ($patterns) {
 	print "$pat\n" if 0 == $myngram{$pat}++;
-	return 1;
-    } elsif (defined $n2{$pat}) {
+    } 
+    if (defined $n2{$pat}) {
 	return $n2{$pat};
     } else {
 	warn "[$pat] some patterns not found, using zero\n" 
