@@ -1,5 +1,5 @@
-.\" $Id: glookup.1,v 1.2 2007/11/26 16:36:17 dyuret Exp dyuret $
-.TH glookup 1 "$Date: 2007/11/26 16:36:17 $" "Web1T Tools"
+.\" $Id: glookup.1,v 1.3 2008/01/09 22:42:57 dyuret Exp dyuret $
+.TH glookup 1 "$Date: 2008/01/09 22:42:57 $" "Web1T Tools"
 
 .SH NAME
 glookup \- reads ngram patterns with wildcards from stdin and prints
@@ -11,6 +11,7 @@ their counts from the Web1T Google ngram data.
 .IR google-ngram-path ] 
 .RB [ -a ] 
 .RB [ -2 ]
+.RB [ -0 ]
 .RI < " patterns " > " counts"
 
 .SH DESCRIPTION
@@ -23,7 +24,7 @@ The input should have a single pattern on each line consisting of
 space separated tokens with '_' representing the wildcard token that
 matches any word.  The output will have up to three counts (tab
 separated) next to each pattern.  Patterns with zero counts will not
-be output.
+be output by default.
 
  n0: the total count of the ngrams matching a given pattern.
 
@@ -32,9 +33,11 @@ only output for patterns with wildcards.
 
  n2: the number of distinct words that appear as the last word in a
 pattern.  This is output for patterns that have more than one wildcard
-and end with a wildcard.  This is needed for Kneser-Ney smoothing.
+and end with a wildcard.  The n2 output is optional and was used in an
+older version of Kneser-Ney smoothing.
 
-For reference, here are the counts for all-wildcard patterns:
+For reference, here are the counts for the all-wildcard patterns.
+If your counts differ you may not have the latest patch from Google.
 
                 n0              n1              n2
  _              1024908267229   13588391        -
@@ -61,7 +64,7 @@ The general form of an interpolated language model is
 
 Typically f(abc) is discounted to be less than the maximum likelihood
 estimate n0(abc)/n0(ab_) so that there is some probability mass left
-over for words never seen in the context (ab).  In Kneser-Ney,
+over for words never seen in the context (ab_).  In Kneser-Ney,
 discounting is accomplished by subtracting a constant from the ngram
 count:
 
@@ -98,13 +101,12 @@ of words preceding it:
 There are a couple of complications that stem from the incompleteness
 of Google ngram counts.  All ngrams with counts less than 40 have been
 omitted.  Thus for example we cannot use n0(ab) instead of n0(ab_), or
-n1(b_) instead of n2(_b_).  Therefore all three counts, n0, n1, and n2
-are necessary for KN discounting with Google ngrams.  Secondly, the
-discount factor formula N1/(N1+2*N2) does not work for the highest
-order because we don't know N1 or N2.  In fact the best D is
-empirically found to be close to 40 because the minimum n0 number it
-will be subtracted from is 40.  The best D for lower order ngrams can
-still be computed using the formula.
+n1(b_) instead of n2(_b_).  Secondly, the discount factor formula
+N1/(N1+2*N2) does not work for the highest order because we don't know
+N1 or N2.  In fact the best D is empirically found to be close to 40
+because the minimum n0 number it will be subtracted from is 40.  The
+best D for lower order ngrams can still be computed using the formula
+or by optimization.
  
 .SH OPTIONS
 
@@ -123,8 +125,14 @@ supressed for patterns that only consist of wildcards.
 
 .TP
 .B \-2
-Turn off the counting and printing of n2.  This saves some memory when
-the n2 counts are not needed.
+Turn on the counting and printing of n2.  By default n2 is not printed
+which saves some memory when the n2 counts are not needed.
+
+.TP
+.B \-0
+Turn on the printing of zero count patterns.  By default any pattern
+with a zero count will not be printed.  However having the counts for
+the complete list of input patterns is sometimes useful for debugging.
 
 .SH BUGS
 None whatsoever.
