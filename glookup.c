@@ -1,6 +1,6 @@
 /* -*- mode: C; mode: Outline-minor; outline-regexp: "/[*][*]+"; -*- */
-const char *rcsid = "$Id: glookup.c,v 1.8 2007/11/28 15:41:56 dyuret Exp dyuret $";
-const char *help = "glookup [-p google-ngram-path] [-a] [-2] < patterns > counts";
+const char *rcsid = "$Id: glookup.c,v 1.9 2008/01/09 22:45:23 dyuret Exp dyuret $";
+const char *help = "glookup [-a20] [-p google-ngram-path] < patterns > counts";
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,23 +17,26 @@ const char *help = "glookup [-p google-ngram-path] [-a] [-2] < patterns > counts
 static char *path = ".";	/* google-ngram path */
 static int all_ngrams = 0;	/* whether to print all ngrams matching a wildcard pattern */
 static int no_n2 = 0;		/* whether to compute n2 (by default we do but it takes memory) */
+static int output_zero = 0;	/* whether to print out ngrams with zero count (default no) */
 
 static struct option long_options[] = {
   {"path", 1, 0, 'p'},
   {"all", 0, 0, 'a'},
   {"no_n2", 0, 0, '2'},
+  {"output_zero", 0, 0, '0'},
   {0, 0, 0, 0}
 };
 
 void get_options(int argc, char *argv[]) {
   while(1) {
     int option_index = 0;
-    int c = getopt_long_only(argc, argv, "p:a2", long_options, &option_index);
+    int c = getopt_long_only(argc, argv, "p:a20", long_options, &option_index);
     if (c == -1) break;
     switch(c) {
     case 'p': path = optarg; break;
     case 'a': all_ngrams = 1; break;
     case '2': no_n2 = 1; break;
+    case '0': output_zero = 1; break;
     default: g_message(help); exit(0);
     }
   }
@@ -180,12 +183,17 @@ Hash pattern_hash_init() {
 /* To print the pattern counts after going through google ngrams */
 
 void pattern_hash_print_fn(Pattern pat, Counter cnt, GString *gstr) {
-  /* Do not print patterns with zero count or patterns with no
-     wildcards - no wildcards get printed out when first seen. */
-  if ((cnt == NULL) || (cnt->n0 == 0)) return;
-
+  /* By default, do not print patterns with zero count or patterns
+     with no wildcards - no wildcards get printed out when first
+     seen and removed from hash. */
+  if (!output_zero) {
+    if ((cnt == NULL) || (cnt->n0 == 0)) return;
+  }
+  /* No-wildcard ngrams that have not been seen remain in the hash and
+     have NULL counts. */
   printf("%s\t%" G_GUINT64_FORMAT,
-	 ngram_to_gstring(gstr, pat), cnt->n0);
+	 ngram_to_gstring(gstr, pat), 
+	 ((cnt == NULL) ? 0 : cnt->n0));
   int nwild = ngram_count_wildcards(pat);
   if (nwild > 0) {
     printf("\t%u", cnt->n1);
@@ -283,7 +291,10 @@ void mask_table_dump(Mask **mask_table) {
 
 /** read_patterns(): Reads ngram patterns from stdin and returns a
  * hash table where keys are the patterns and the values are empty
- * counters. */
+ * counters. 
+ * Note: no counter needed for no-wildcard ngrams, they will be
+ * printed when they are encountered.
+ */
 
 Hash read_patterns() {
   EmptyPattern pat;
@@ -321,6 +332,8 @@ void count_ngram(Hash patterns, Ngram ngm, guint64 ngram_cnt, Mask *masks) {
       if (nwild == 0) {
 	nowild = 1;
 	ngram_print_count(ngm, ngram_cnt);
+	/* we delete no-wildcard ngrams when we print them */
+	/* if there are any left at the end they must have 0 count */
 	hdel(patterns, pat);
       } else {
 	cnt = (Counter) val;
