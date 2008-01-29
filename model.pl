@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.16 2008/01/28 23:06:16 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.17 2008/01/29 06:20:24 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -27,15 +27,21 @@ my $ngram = 5;
 my $random = 0;
 my $zeroes = 0;
 # smoothing = { mc, baseline, kn, cdiscount, knmc, wbdiscount }
-my $smoothing = 'mc';
+my $smoothing = 'knmod';
+my $string = '';
 my @C = (undef, undef, 0.12264181, 0.48531058, 0.73285371, 0.8485226); # baseline: 8.20830869973577
 my @D = (undef, undef, 7.8440119, 6.6305746, 6.9277921, 7.3675802); # mc: 8.0477965326711
 my @KN = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # kn: 8.23974660099736
 my @E = (undef, undef, 0.58301752, 0.79111861, 0.92800359, 0.9840277); # cdiscount: 
 my @KNMC = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # knmc: 
-#my @KNMOD = (0.34999882, 0.058431153, 0.3384098, 0.71771877, 3.1924666, 3.0841902, 3.838957, 4.1892848); # 1k: 7.8232
-#my @KNMOD = (0.34999882, 0.058431153, 0.3384098, 0.71771877, 3, 3, 3, 3);
-my @KNMOD = (1.4369137, 1.3023956, 2.0387025, 2.4608132, 3.1924666, 2.9146141, 3.4571246, 3.9006402, 1, 1, 1); # 1K 7.8031, full 7.85546296227405
+
+my @KNMOD = 			# knmod: 1k=7.80248865053247 full=7.85466149603376
+    (
+     1.4351794, 		# coef=(A+1)/(A+40) for kn2 (7.8536 if 0)
+     1.3009039, 2.0350656, 2.4501021, # C2..C4 (x n1modx_) for kn2; D=1 for kn2 (8.0358 if 0)
+     3.0263603, 2.9146123, 3.1023827, 3.5312749, # C2..C5 (x mc) for kn (8.8599 if 0)
+     0.17869642, 3.3607215e-05, 0.23590772, 0.22686745 # D2..D5 (x40) for kn (7.8035 if 0)
+     );
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
@@ -48,6 +54,7 @@ GetOptions('cache=s' => \$cachefile,
            'zeroes' => \$zeroes,
 	   'ngram=i' => \$ngram,
            'smoothing=s' => \$smoothing,
+	   'string=s' => \$string,
  	   'c2=f' => \$C[2],
  	   'c3=f' => \$C[3],
  	   'c4=f' => \$C[4],
@@ -77,6 +84,7 @@ my %init_fn =
      'knmc' => \&init_knmc,
      'knmod' => \&init_knmod,
      );
+
 my %score_fn = 
     ('mc' => \&score_mc, 
      'baseline' => \&score_baseline, 
@@ -94,14 +102,27 @@ my $ZERO_WARNING;
 my (%n0, %n1, %n2);
 my $GTotal = $patterns ? 1024908267229 : cnt_init($cachefile);
 warn "\ngtotal=$GTotal\n";
-my $corpus = read_corpus();
-warn "corpus=" . scalar(@$corpus) . " sentences\n";
 my $nline = 0;
 my $nscore = 0;
 my $infinity = 1E9;
 my $epsilon = 1E-6;
 my $MINNGRAM = 40;
 my %myngram;
+
+if ($string) {
+    my @s = split(' ', $string);
+    my $i = $#s;
+    print $s[$i];
+    for (my $n = 1; $n <= $ngram; $n++) {
+	printf "\t%.4f", bits(\@s, $i, $n);
+    }
+    printf "\n";
+    exit;
+}
+
+my $corpus = read_corpus();
+warn "corpus=" . scalar(@$corpus) . " sentences\n";
+
 $optimize ? optimize() : ngram();
 
 # Subroutines:
@@ -184,7 +205,7 @@ sub init_knmc {
 
 sub init_knmod {
     my $init;
-    my $ndims = 3 * $ngram - 4;
+    my $ndims = 3 * $ngram - 3;
     $init = $zeroes ? ones($ndims) 
 	: $random ? random($ndims)
 	: pdl(@KNMOD[0 .. $ndims-1]);
@@ -276,7 +297,7 @@ sub score_knmod {
 	my $xi = $x->at($i);
 	if ($xi < 0) {
 	    return $infinity;
-	} elsif ($i >= $x->nelem - 3 and $xi > 1) { 
+	} elsif ($i >= $x->nelem - 4 and $xi > 1) { 
 # BUG: this wont work with order < 5
 	    return $infinity;
 	}
@@ -543,13 +564,13 @@ sub kn {
     $nxy = n0("$x $s->[$i]");
     warn("kn($s->[$i],$i,$n): ML: nxy = $nxy / nx = $nx => ".($nxy/$nx)."\n") if $debug;
     warn("kn($s->[$i],$i,$n): nx=$nx nx_=$nx_ mc=$mc\n") if $debug;
-#     $D = $MINNGRAM * 
-# 	(($smoothing eq 'kn') ? $KN[2*$n-4] :
-# 	 ($smoothing eq 'knmc') ? $KNMC[2*$n-4] :
-# 	 ($smoothing eq 'knmod') ? $KNMOD[2*$n-3] :
-# 	 die "Bad smoothing [$smoothing]");
-#     warn("kn($s->[$i],$i,$n): D = $D\n") if $debug;
-#    $nxy -= $D if $nxy > 0;
+    $D = $MINNGRAM * 
+	(($smoothing eq 'kn') ? $KN[2*$n-4] :
+	 ($smoothing eq 'knmc') ? $KNMC[2*$n-4] :
+	 ($smoothing eq 'knmod') ? $KNMOD[$n+6] :
+	 die "Bad smoothing [$smoothing]");
+    warn("kn($s->[$i],$i,$n): D = $D\n") if $debug;
+    $nxy -= $D if $nxy > 0;
 
     $n1x_ = n1("$x _");
     warn("kn($s->[$i],$i,$n): n1x_ = $n1x_\n") if $debug;
@@ -574,7 +595,11 @@ sub kn {
     #7.8340994726598 <= [0.32673847 0.055480826 0.32197277 0.66516695  1.9684104  2.5096591  3.3671446  3.7403359]
 
     $extra = 1 if $extra == 0;
-    $kn = ($nxy  + $kn0 * $extra) / ($nx_ + $extra);
+
+    #orig: $kn = $nxy / $nx + (($mc + $n1x_ * $D) / $nx) * $kn0;
+    #modf: $kn = ($nxy  + $kn0 * $extra) / ($nx_ + $extra);
+    $kn = ($nxy + $kn0 * ($extra + $n1x_ * $D)) / ($nx_ + $extra);
+
     die "nxy=$nxy kn0=$kn0 mc=$mc nx_=$nx_ nx=$nx kn=0" if $kn == 0;
 
     warn("kn($s->[$i],$i,$n): kn = $kn\n") if $debug;
@@ -725,8 +750,9 @@ sub kn2 {
     my $n1_xy = n1mod("_ $x $y", $coef);
     die "n1_xy=$n1_xy" if ($n1_xy > 0 and $n1_xy < 1);
     warn("kn2($y,$i,$n): ML: n1_xy = $n1_xy / n1_x_ = $n1_x_ => ".($n1_xy/$n1_x_)."\n") if $debug;
-    my $D = $KNMOD[$n+6];
-    $D = 1 if $D > 1;
+#    my $D = $KNMOD[$n+6];
+#    $D = 1 if $D > 1;
+    my $D = 1;			# optimization gives 1.
     warn("kn2($y,$i,$n): D = $D\n") if $debug;
     $n1_xy -= $D if $n1_xy > 0;
 
