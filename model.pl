@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.15 2008/01/28 22:17:32 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.16 2008/01/28 23:06:16 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -33,7 +33,9 @@ my @D = (undef, undef, 7.8440119, 6.6305746, 6.9277921, 7.3675802); # mc: 8.0477
 my @KN = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # kn: 8.23974660099736
 my @E = (undef, undef, 0.58301752, 0.79111861, 0.92800359, 0.9840277); # cdiscount: 
 my @KNMC = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # knmc: 
-my @KNMOD = (0.34999882, 0.058431153, 0.3384098, 0.71771877, 3.1924666, 3.0841902, 3.838957, 4.1892848); # 1k: 7.8232
+#my @KNMOD = (0.34999882, 0.058431153, 0.3384098, 0.71771877, 3.1924666, 3.0841902, 3.838957, 4.1892848); # 1k: 7.8232
+#my @KNMOD = (0.34999882, 0.058431153, 0.3384098, 0.71771877, 3, 3, 3, 3);
+my @KNMOD = (1.4369137, 1.3023956, 2.0387025, 2.4608132, 3.1924666, 2.9146141, 3.4571246, 3.9006402, 1, 1, 1); # 1K 7.8031, full 7.85546296227405
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
@@ -182,7 +184,7 @@ sub init_knmc {
 
 sub init_knmod {
     my $init;
-    my $ndims = 2 * $ngram - 2;
+    my $ndims = 3 * $ngram - 4;
     $init = $zeroes ? ones($ndims) 
 	: $random ? random($ndims)
 	: pdl(@KNMOD[0 .. $ndims-1]);
@@ -273,6 +275,9 @@ sub score_knmod {
     for (my $i = 0; $i < $x->nelem; $i++) {
 	my $xi = $x->at($i);
 	if ($xi < 0) {
+	    return $infinity;
+	} elsif ($i >= $x->nelem - 3 and $xi > 1) { 
+# BUG: this wont work with order < 5
 	    return $infinity;
 	}
 	$KNMOD[$i] = $xi;
@@ -408,7 +413,6 @@ sub bits {
     } elsif ($smoothing =~ /^mc/) {
 	warn "mc($s->[$i],$i,$n): ML=$gb/$gc=".($gc>0?$gb/$gc:0)."\n" if $debug;
 	my $extra = $D[$n] * $missing_count;
-#	my $extra = $D[$n] * $gc;
 	$extra = 1 if $extra == 0;
 	warn "mc($s->[$i],$i,$n): mc=$missing_count x D=$D[$n] = $extra\n" if $debug;
 	if ($smoothing eq 'mcmod') {
@@ -560,7 +564,15 @@ sub kn {
     #$kn = $nxy / $nx_ + $kn0 * $D * $n1x_ / $nx_;
 
     # mc formulation
-    my $extra = $KNMOD[$n+2] * $mc;
+    my $extra = $KNMOD[$n+2] * $mc;  #7.8232
+    #7.82316150800905 <= [0.34999882 0.058431153  0.3384098 0.71771877  3.1924666  3.0841902   3.838957  4.1892848]
+
+    #my $extra = $KNMOD[$n+2] * $nx_; #7.90
+    #7.90320385739 <= 0.262751247301 0.048686713198 0.27605715289 0.568193284213 0.088951456544 0.715625 1.73570024289 2.16562605758 ssize=-0.0123526471100327
+
+    #my $extra = $KNMOD[$n+2] * 100 * $n1x_; #7.8341
+    #7.8340994726598 <= [0.32673847 0.055480826 0.32197277 0.66516695  1.9684104  2.5096591  3.3671446  3.7403359]
+
     $extra = 1 if $extra == 0;
     $kn = ($nxy  + $kn0 * $extra) / ($nx_ + $extra);
     die "nxy=$nxy kn0=$kn0 mc=$mc nx_=$nx_ nx=$nx kn=0" if $kn == 0;
@@ -713,16 +725,36 @@ sub kn2 {
     my $n1_xy = n1mod("_ $x $y", $coef);
     die "n1_xy=$n1_xy" if ($n1_xy > 0 and $n1_xy < 1);
     warn("kn2($y,$i,$n): ML: n1_xy = $n1_xy / n1_x_ = $n1_x_ => ".($n1_xy/$n1_x_)."\n") if $debug;
-    my $D = $KNMOD[$n-1];
+    my $D = $KNMOD[$n+6];
+    $D = 1 if $D > 1;
     warn("kn2($y,$i,$n): D = $D\n") if $debug;
-    $D = 1;
     $n1_xy -= $D if $n1_xy > 0;
 
     my $n1x_ = n1("$x _");
     warn("kn2($y,$i,$n): n1x_ = $n1x_\n") if $debug;
 
     my $C = $KNMOD[$n-1];
-    my $kn2 = ($n1_xy + $p0 * ($C * $n1_x_ + $D * $n1x_)) / ($C * $n1_x_ + $n1_x_);
+
+    my $n1modx_ = n1mod("$x _");
+    my $kn2 = ($n1_xy + $p0 * ($C * $n1modx_ + $D * $n1x_)) / ($C * $n1modx_ + $n1_x_);
+
+#7.8232 my $kn2 = ($n1_xy + $p0 * ($C * $n1_x_ + $D * $n1x_)) / ($C * $n1_x_ + $n1_x_);
+#7.82316150800905 <= [0.34999882 0.058431153  0.3384098 0.71771877  3.1924666  3.0841902   3.838957  4.1892848]
+
+#7.8072 my $kn2 = ($n1_xy + $p0 * ($C * $n1x_ + $D * $n1x_)) / ($C * $n1x_ + $n1_x_); #*run*
+#7.80719881238559 <= [ 1.1273339  2.5163229  4.8874927  6.8448645  3.1924666  2.9414249  3.5130246  3.9000424]
+
+#    my $n1modx_ = n1mod("$x _");# *run4*
+#7.8031 my $kn2 = ($n1_xy + $p0 * ($C * $n1modx_ + $D * $n1x_)) / ($C * $n1modx_ + $n1_x_);	# *run4*
+#7.80310938385236 <= [ 1.4369137  1.3023956  2.0387025  2.4608132  3.1924666  2.9146141  3.4571246  3.9006402]
+
+#    my $n1_x = n1("_ $x");	# *run2*
+#7.8162 my $kn2 = ($n1_xy + $p0 * ($C * $n1_x + $D * $n1x_)) / ($C * $n1_x + $n1_x_); #*run2*
+#7.81622506825492 <= [0.56228426   1.422944  3.5268414  5.2919063  3.1924666  3.0078189  3.6986144  4.2018432]
+
+#    my $n1mod_x = n1mod("_ $x");	# *run3*
+#7.8149 my $kn2 = ($n1_xy + $p0 * ($C * $n1mod_x + $D * $n1x_)) / ($C * $n1mod_x + $n1_x_); #*run3*
+#7.81492091713032 <= [0.59317426 0.63644359  1.3401929  1.8563427  3.1924666  2.9976826  3.6738253  4.2409812]
 
     warn("kn2($y,$i,$n): kn2 = $kn2\n") if $debug;
     return $kn2;
@@ -861,7 +893,7 @@ sub dhc {
 	} else {
 	    $fx = $fxv; printf("%d. %.12g <= ", ++$count, $fx);
 	    for($i=0; $i<$NDIM; $i++) { $x[$i] = $xv[$i]; printf("%.12g ", $x[$i]); }
-	    printf("\n");
+	    printf("ssize=$vr\n");
 	    if($iter == 0) {
 		if($vvec) {
 		    for($i=0; $i<$NDIM; $i++) {
