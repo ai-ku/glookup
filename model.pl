@@ -1,21 +1,36 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.18 2008/01/29 08:52:59 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.19 2008/01/29 21:53:21 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
 use PDL;
 use PDL::Opt::Simplex;
 use Data::Dumper;
-
-my $oldfh = select(STDERR); $| = 1; select($oldfh);
 require 'gtokenize.pl';
 require 'fileio.pl';
+
+my $oldfh = select(STDERR); $| = 1; select($oldfh);
 my $log2 = log(2);
 sub log2 { log($_[0])/$log2; }
 sub exp2 { exp($_[0]*$log2); }
 my $log10 = log(10);
 #sub log10 { log($_[0])/$log10; } # defined in PDL
 sub exp10 { exp($_[0]*$log10); }
+
+# Discounting parameters:
+
+my @C = (undef, undef, 0.12264181, 0.48531058, 0.73285371, 0.8485226); # baseline: 8.20830869973577
+my @D = (undef, undef, 7.8440119, 6.6305746, 6.9277921, 7.3675802); # mc: 8.0477965326711
+my @KN = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # kn: 8.23974660099736
+my @E = (undef, undef, 0.58301752, 0.79111861, 0.92800359, 0.9840277); # cdiscount: 
+my @KNMC = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # knmc: 
+my @KNMOD = 			# knmod: 1k=7.80248865053247 full=7.85466149603376
+    (
+     1.4351794, 		# coef=(A+1)/(A+40) for kn2 (7.8536 if 0)
+     1.3009039, 2.0350656, 2.4501021, # C2..C4 (x n1modx_) for kn2; D=1 for kn2 (8.0358 if 0)
+     3.0263603, 2.9146123, 3.1023827, 3.5312749, # C2..C5 (x mc) for kn (8.8599 if 0)
+     0.17869642, 3.3607215e-05, 0.23590772, 0.22686745 # D2..D5 (x40) for kn (7.8035 if 0)
+     );
 
 # Command line options:
 
@@ -33,19 +48,7 @@ my $zeroes = 0;
 my $smoothing = 'knmod';
 my $string = '';
 my $verify = '';
-my @C = (undef, undef, 0.12264181, 0.48531058, 0.73285371, 0.8485226); # baseline: 8.20830869973577
-my @D = (undef, undef, 7.8440119, 6.6305746, 6.9277921, 7.3675802); # mc: 8.0477965326711
-my @KN = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # kn: 8.23974660099736
-my @E = (undef, undef, 0.58301752, 0.79111861, 0.92800359, 0.9840277); # cdiscount: 
-my @KNMC = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # knmc: 
-
-my @KNMOD = 			# knmod: 1k=7.80248865053247 full=7.85466149603376
-    (
-     1.4351794, 		# coef=(A+1)/(A+40) for kn2 (7.8536 if 0)
-     1.3009039, 2.0350656, 2.4501021, # C2..C4 (x n1modx_) for kn2; D=1 for kn2 (8.0358 if 0)
-     3.0263603, 2.9146123, 3.1023827, 3.5312749, # C2..C5 (x mc) for kn (8.8599 if 0)
-     0.17869642, 3.3607215e-05, 0.23590772, 0.22686745 # D2..D5 (x40) for kn (7.8035 if 0)
-     );
+my $mincnt = 0;
 
 GetOptions('cache=s' => \$cachefile,
            'verbose' => \$verbose,
@@ -60,6 +63,7 @@ GetOptions('cache=s' => \$cachefile,
            'smoothing=s' => \$smoothing,
 	   'string=s' => \$string,
 	   'verify=s' => \$verify,
+	   'mincnt=i' => \$mincnt,
  	   'c2=f' => \$C[2],
  	   'c3=f' => \$C[3],
  	   'c4=f' => \$C[4],
@@ -378,9 +382,9 @@ sub process_sentence {
 	    printf "\t%.4f\n", $b;
 	}
 # The unknown word hack
-#  	if (n0($s->[$i]) < 1000) {
-#  	    $s->[$i] = '<UNK>';
-#  	}
+  	if ($mincnt and n0($s->[$i]) < $mincnt) {
+  	    $s->[$i] = '<UNK>';
+  	}
     }
     print "\n" if $verbose;
     return ($nbits, $nword);
