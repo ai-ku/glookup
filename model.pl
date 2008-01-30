@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.20 2008/01/29 22:09:24 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.21 2008/01/30 09:43:21 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -25,12 +25,17 @@ my @D = (undef, undef, 7.8440119, 6.6305746, 6.9277921, 7.3675802); # mc: 8.0477
 my @KN = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # kn: 8.23974660099736
 my @E = (undef, undef, 0.58301752, 0.79111861, 0.92800359, 0.9840277); # cdiscount: 
 my @KNMC = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # knmc: 
-my @KNMOD = 			# knmod: 1k=7.80248865053247 full=7.85466149603376
+
+my @KNMOD = 			# 7.80310938385546 on 1k, 7.85546292193106 on brown.gtok.nounk
     (
-     1.4351794, 		# coef=(A+1)/(A+40) for kn2 (7.8536 if 0)
-     1.3009039, 2.0350656, 2.4501021, # C2..C4 (x n1modx_) for kn2; D=1 for kn2 (8.0358 if 0)
-     3.0263603, 2.9146123, 3.1023827, 3.5312749, # C2..C5 (x mc) for kn (8.8599 if 0)
-     0.17869642, 3.3607215e-05, 0.23590772, 0.22686745 # D2..D5 (x40) for kn (7.8035 if 0)
+     # coef=(A+1)/(A+40) for kn2:
+     1.4368796,
+
+     # C2..C5 (x mc) for kn:	# C2..C4 (x n1modx_) for kn2:
+     3.192501, 			1.3022398,
+     2.9146123, 		2.0386943, 
+     3.4570501, 		2.4608205,
+     3.9005968,
      );
 
 # Wildcard counts:
@@ -247,7 +252,7 @@ sub init_knmc {
 
 sub init_knmod {
     my $init;
-    my $ndims = 3 * $config{ngram} - 3;
+    my $ndims = 2 * $config{ngram} - 2;
     $init = $config{zeroes} ? ones($ndims) 
 	: $config{random} ? random($ndims)
 	: pdl(@KNMOD[0 .. $ndims-1]);
@@ -338,9 +343,6 @@ sub score_knmod {
     for (my $i = 0; $i < $x->nelem; $i++) {
 	my $xi = $x->at($i);
 	if ($xi < 0) {
-	    return $infinity;
-	} elsif ($i >= $x->nelem - 4 and $xi > 1) { 
-# BUG: this wont work with order < 5
 	    return $infinity;
 	}
 	$KNMOD[$i] = $xi;
@@ -613,13 +615,15 @@ sub kn {
     $nxy = n0("$x $y");
     warn("kn($y,$i,$n): ML: nxy = $nxy / nx = $nx => ".($nxy/$nx)."\n") if $config{debug};
     warn("kn($y,$i,$n): nx=$nx nx_=$nx_ mc=$mc\n") if $config{debug};
-    $D = $MINNGRAM * 
-	(($config{smoothing} eq 'kn') ? $KN[2*$n-4] :
-	 ($config{smoothing} eq 'knmc') ? $KNMC[2*$n-4] :
-	 ($config{smoothing} eq 'knmod') ? $KNMOD[$n+6] :
-	 die "Bad smoothing [$config{smoothing}]");
-    warn("kn($y,$i,$n): D = $D\n") if $config{debug};
-    $nxy -= $D if $nxy > 0;
+
+#   This gave us less than a cent:
+#     $D = $MINNGRAM * 
+# 	(($config{smoothing} eq 'kn') ? $KN[2*$n-4] :
+# 	 ($config{smoothing} eq 'knmc') ? $KNMC[2*$n-4] :
+# 	 ($config{smoothing} eq 'knmod') ? $KNMOD[3*$n-4] :
+# 	 die "Bad smoothing [$config{smoothing}]");
+#     warn("kn($y,$i,$n): D = $D\n") if $config{debug};
+#     $nxy -= $D if $nxy > 0;
 
     $n1x_ = n1("$x _");
     warn("kn($y,$i,$n): n1x_ = $n1x_\n") if $config{debug};
@@ -643,14 +647,15 @@ sub kn {
     #my $extra = $KNMOD[$n+2] * 100 * $n1x_; #7.8341
     #7.8340994726598 <= [0.32673847 0.055480826 0.32197277 0.66516695  1.9684104  2.5096591  3.3671446  3.7403359]
 
-    my $extra = $KNMOD[$n+2] * $mc;
+    my $extra = $KNMOD[2*$n-3] * $mc;
     $extra = 1 if $extra == 0;
 
     #orig: $kn = $nxy / $nx + (($mc + $n1x_ * $D) / $nx) * $kn0;
     #modf: $kn = ($nxy  + $kn0 * $extra) / ($nx_ + $extra);
-    #eqiv: $kn = ($nxy + $kn0 * ($extra + $n1x_ * $D)) / ($nx + $extra - $mc);
+    #equiv: $kn = ($nxy + $kn0 * ($extra + $n1x_ * $D)) / ($nx + $extra - $mc);
+    #withD: $kn = ($nxy + $kn0 * ($extra + $n1x_ * $D)) / ($nx_ + $extra);
 
-    $kn = ($nxy + $kn0 * ($extra + $n1x_ * $D)) / ($nx_ + $extra);
+    $kn = ($nxy + $kn0 * $extra) / ($nx_ + $extra);
 
     die "nxy=$nxy kn0=$kn0 mc=$mc nx_=$nx_ nx=$nx kn=0" if $kn == 0;
 
@@ -811,7 +816,7 @@ sub kn2 {
     my $n1x_ = n1("$x _");
     warn("kn2($y,$i,$n): n1x_ = $n1x_\n") if $config{debug};
 
-    my $C = $KNMOD[$n-1];
+    my $C = $KNMOD[2*$n-2];
 
     my $n1modx_ = n1mod("$x _");
     my $kn2 = ($n1_xy + $p0 * ($C * $n1modx_ + $D * $n1x_)) / ($C * $n1modx_ + $n1_x_);
@@ -1050,7 +1055,24 @@ model.pl - Optimize and test language models
 
 model.pl [options] [file ...]
 
- Options:
+Typical usage:
+
+  model.pl -patterns < text > patterns
+  glookup < patterns > counts
+  model.pl -counts counts < text
+
+B<This program> will read the given input file(s) and compute cross
+entropy for a language model specified by -smoothing and the counts
+given in the -counts file.  The -optimize and related options perform
+parameter optimization for the given -smoothing option.  The -patterns
+option outputs the patterns that the -counts file will need to contain
+in order to compute cross entropy.
+
+The valid smoothing options are: baseline, kn, knmc, knmod, mc, mcmod,
+cdiscount, wbdiscount.  Default is knmod, which gives 7.85 bits per
+word on the brown corpus.
+
+=head1 OPTIONS
    -counts file		read counts from file
    -debug		detailed debug output
    -dhc			use DHC for optimization
@@ -1065,17 +1087,6 @@ model.pl [options] [file ...]
    -verbose		output bits for each word and each ngram order
    -verify str		verify probability=1 for last position of "str"		
    -zeroes		start optimization at zero
-
-B<This program> will read the given input file(s) and compute cross
-entropy for a language model specified by -smoothing and the counts
-given in the -counts file.  The -optimize and related options perform
-parameter optimization for the given -smoothing option.  The -patterns
-option outputs the patterns that the -counts file will need to contain
-in order to compute cross entropy.
-
-The valid smoothing options are: baseline, kn, knmc, knmod, mc, mcmod,
-cdiscount, wbdiscount.  Default is knmod, which gives 7.85 bits per
-word on the brown corpus.
 
 =cut
 
