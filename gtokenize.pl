@@ -77,6 +77,9 @@ sub gtokenize {
     # Split periods at the end of a sentence:
     $str =~ s/(\w)(\.\W*)$/$1 $2/;
 
+    # Acronyms seem to be split (U.S. 37381; U. S. 238053)
+    while($str =~ s/([A-Z][.])([A-Z][.])/$1 $2/g) {};
+
     return split(' ', $str);
 }
 
