@@ -1,10 +1,12 @@
 #!/usr/bin/perl -w
 use strict;
-warn q{$Id: kn.pl,v 1.5 2008/01/06 12:30:26 dyuret Exp dyuret $ }."\n";
+warn q{$Id: kn.pl,v 1.6 2008/01/29 11:50:53 dyuret Exp dyuret $ }."\n";
 my $DEBUG = 0;
 my $ANY = '_';
 my $NGRAM = 5;
 my $MINNGRAM = 40;
+my %myngram;
+my %MISSING;
 
 # The following parameters have been optimized on the Brown corpus:
 
@@ -28,7 +30,7 @@ my @KNMOD = 			# knmod: 1k=7.80248865053247 full=7.85466149603376
 # the sentence array should be <S>.  The model needs to be initialized
 # (kn_init) with a file of counts before use.  If this is not
 # performed, then the program simply writes out the patterns that
-# would be needed for its computation into the hash %main::kn_patterns
+# would be needed for its computation into the hash %myngram
 
 # BUG: For unknown words we assume a count of 100, which is half of
 # the minimum count for google tokens.
@@ -59,7 +61,6 @@ my %kn2;
 sub kn_init {
     my $path = shift;
     $DEBUG = shift;
-    undef $main::kn_patterns;
     return if not defined $path;
     open(FP, $path) or die $!;
     while(<FP>) {
@@ -103,9 +104,10 @@ sub kn {
     # and y stands for the target word.
 
     my $p;
+    my $y = $s->[$i];
 
     if ($n == 1) {
-	my $ny = kn0($s->[$i]);
+	my $ny = kn0($y);
 	if ($ny == 0) {
 	    # BUG: Any word below 200 count is excluded from the google
 	    # data.  We will give such words a count of 100.  Note that
@@ -115,7 +117,7 @@ sub kn {
 	}
 	my $n_ = kn0($ANY);
 	$p = $ny / $n_;
-	warn "kn($s->[$i],$i,$n): $ny/$n_=$p\n" if $DEBUG;
+	warn "kn($y,$i,$n): $ny/$n_=$p\n" if $DEBUG;
 
     } else {
 
@@ -125,13 +127,13 @@ sub kn {
 	my $n0x_ = kn0("$x _");
 	my $n0x  = kn0($x);
 	my $mc = $n0x - $n0x_;
-	# BUG: we should take n0x_ here or divide by n0x down below.
+
 	if (($n0x == 0)
 	    # Backoff when context count is zero
 	    # BUG: instead of backing off here, we should try using the
 	    # <UNK> token for unknown words in context.
 	    or ((" $x " =~ / [;!?.] /) and
-		not ($x =~ /^[^;!?.]*[;!?.]$/ and $s->[$i] eq '</S>'))
+		not ($x =~ /^[^;!?.]*[;!?.]$/ and $y eq '</S>'))
 	    # bad context: google data does not have any regular tokens
 	    # following these four characters.
 	    or (not %kn0)
@@ -143,7 +145,7 @@ sub kn {
 	    # counts when backing off because of a zero context.
 	    $p = kn($s, $i, $n-1); 
 
-	    warn("kn($s->[$i],$i,$n): nx=$n0x nx_=$n0x_ skip [$x]\n") if $DEBUG;
+	    warn("kn($y,$i,$n): nx=$n0x nx_=$n0x_ skip [$x]\n") if $DEBUG;
 
 	    # This is the srilm implementation, always use the
 	    # modified context when backing off.
@@ -153,16 +155,16 @@ sub kn {
 	}
 
 	my $p0 = kn_backoff($s, $i, $n-1);
-	warn("kn($s->[$i],$i,$n): kn0 = $p0\n") if $DEBUG;
+	warn("kn($y,$i,$n): kn0 = $p0\n") if $DEBUG;
 
 	# First approximation
 
-	my $n0xy = kn0("$x $s->[$i]");
-	warn("kn($s->[$i],$i,$n): ML: nxy = $n0xy / nx = $n0x => ".($n0xy/$n0x)."\n") if $DEBUG;
-	warn("kn($s->[$i],$i,$n): nx=$n0x nx_=$n0x_ mc=$mc\n") if $DEBUG;
+	my $n0xy = kn0("$x $y");
+	warn("kn($y,$i,$n): ML: nxy = $n0xy / nx = $n0x => ".($n0xy/$n0x)."\n") if $DEBUG;
+	warn("kn($y,$i,$n): nx=$n0x nx_=$n0x_ mc=$mc\n") if $DEBUG;
 
 	my $D = $MINNGRAM * $KNMOD[$n+6];   # parameter to subtract from the n0xy count
-	warn("kn($s->[$i],$i,$n): D = $D\n") if $DEBUG;
+	warn("kn($y,$i,$n): D = $D\n") if $DEBUG;
 	$n0xy -= $D if $n0xy > 0;	# we only subtract if it is positive
 	# $p = $n0xy / $n0x_;	# first approximation
 	#warn "kn[$n][1]=($n0xy-$D)/$n0x_=$p\n" if $DEBUG;
@@ -175,32 +177,18 @@ sub kn {
 
 	my $n1x_ = kn1("$x $ANY"); # number of distinct words following x
 	# my $mc1 = $D * $n1x_;	# missing count from D subtractions
-	warn("kn($s->[$i],$i,$n): n1x_ = $n1x_\n") if $DEBUG;
-	warn("kn($s->[$i],$i,$n): x = [$x] nx = $n0x\n") if $DEBUG;
-	warn("kn($s->[$i],$i,$n): mc = $mc\n") if $DEBUG;
+	warn("kn($y,$i,$n): n1x_ = $n1x_\n") if $DEBUG;
+	warn("kn($y,$i,$n): x = [$x] nx = $n0x\n") if $DEBUG;
+	warn("kn($y,$i,$n): mc = $mc\n") if $DEBUG;
 
 	# Do some more missing count discounting
 	my $extra = $KNMOD[$n+2] * $mc;
 	$extra = 1 if 0 == $extra;
 
 	$p = ($n0xy + $p0 * ($extra + $n1x_ * $D)) / ($n0x_ + $extra);
-
-	# DEPRECATED:
-	# By using n0x_ instead of n0x we do not need mc2 any more.
-	#
-	# Second source of the missing count is that the google data has
-	# filtered out all ngrams below the count of 40.  Thus there is a
-	# missing count between all ngrams that start with x and the count
-	# of the n-1 gram x itself:
-	# my $nx_ = kn0("$x $ANY");
-	# my $mc2 = $nx - $nx_;
-
-	# Add the kn smoothing term:
-
-	# $p += ($mc1 / $n0x_) * kn_backoff($s, $i, $n-1);
     }
 
-    warn("kn($s->[$i],$i,$n): kn = $p\n") if $DEBUG;
+    warn("kn($y,$i,$n): kn = $p\n") if $DEBUG;
     return $p;
 }
 
@@ -270,58 +258,45 @@ sub kn_backoff {
 sub kn0 {
     my $pat = shift;
     if (not %kn0) {
-	print "$pat\n" unless $main::kn_patterns{$pat}++;
-	return 1;
-    } elsif (defined $kn0{$pat}) {
+	print "$pat\n" unless $myngram{$pat}++;
+    } 
+    if (defined $kn0{$pat}) {
 	return $kn0{$pat};
     } else {
-	die "Error: n0 for pattern not found [$pat]";
+	warn "[$pat] some patterns not found, using zero\n" 
+	    unless %MISSING;
+	$MISSING{$pat}++;
+	return 0;
     }
 }
 
 sub kn1 {
     my $pat = shift;
     if (not %kn0) {
-	print "$pat\n" unless $main::kn_patterns{$pat}++;
-	return 1;
-    } elsif (defined $kn1{$pat}) {
+	print "$pat\n" unless $myngram{$pat}++;
+    } 
+    if (defined $kn1{$pat}) {
 	return $kn1{$pat};
-    } elsif (defined $kn0{$pat}) {
-	if ($kn0{$pat} == 0) {
-	    return 0;
-	} elsif ($pat !~ /_/) {
-	    return 1;
-	} else {
-	    die "Error: n1 for pattern not found [$pat]";
-	}
     } else {
-	die "Error: n0 for pattern not found [$pat]";
+	warn "[$pat] some patterns not found, using zero\n" 
+	    unless %MISSING;
+	$MISSING{$pat}++;
+	return 0;
     }
 }
 
 sub kn2 {
     my $pat = shift;
     if (not %kn0) {
-	print "$pat\n" unless $main::kn_patterns{$pat}++;
-	return 1;
-    } elsif (defined $kn2{$pat}) {
+	print "$pat\n" unless $myngram{$pat}++;
+    } 
+    if (defined $kn2{$pat}) {
 	return $kn2{$pat};
-    } elsif ($pat !~ /^.*_$/) {
-	die "Error: n2 pattern does not end with wildcard [$pat]";
-    } elsif (defined $kn1{$pat}) {
-	if ($pat =~ /^[^_]*_$/) {
-	    return $kn1{$pat};
-	} else {
-	    die "Error: n2 for pattern not found [$pat]";
-	}
-    } elsif (defined $kn0{$pat}) {
-	if ($kn0{$pat} == 0) {
-	    return 0;
-	} else {
-	    die "Error: n1 for pattern not found [$pat]";
-	}
     } else {
-	die "Error: n0 for pattern not found [$pat]";
+	warn "[$pat] some patterns not found, using zero\n" 
+	    unless %MISSING;
+	$MISSING{$pat}++;
+	return 0;
     }
 }
 
@@ -336,6 +311,10 @@ sub kn1mod {
     my $n0 = kn0($pat);
     $pat =~ s/\s*_\s*//;
     my $n0x = kn0($pat);
+    unless ($n0x >= $n0 and $n0 >= $n1) {
+	warn "kn1mod: Inconsistent count [$pat] n1=$n1 n0=$n0 n0x=$n0x\n";
+	return $n1;
+    }
     return $n1 + $coef * ($n0x - $n0);
 }
 
@@ -369,6 +348,12 @@ sub kn_test {
 	}
     }
     close(FP);
+    if (%kn0 and %MISSING) {
+	print STDERR "There were missing patterns:\n";
+	for my $pat (keys %MISSING) {
+	    print STDERR "$pat\n";
+	}
+    }
     $cnt{entropy} = $cnt{bits} / $cnt{words};
     warn Dumper(\%cnt);
 }
