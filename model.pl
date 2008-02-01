@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.21 2008/01/30 09:43:21 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.22 2008/01/30 12:04:02 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -20,16 +20,45 @@ sub exp10 { exp($_[0]*$log10); }
 
 # Discounting parameters:
 
-my @C = (undef, undef, 0.12264181, 0.48531058, 0.73285371, 0.8485226); # baseline: 8.20830869973577
-my @D = (undef, undef, 7.8440119, 6.6305746, 6.9277921, 7.3675802); # mc: 8.0477965326711
-my @KN = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # kn: 8.23974660099736
-my @E = (undef, undef, 0.58301752, 0.79111861, 0.92800359, 0.9840277); # cdiscount: 
-my @KNMC = (0.83456664, 0.80501932, 0.81691654, 0.90655321, 0.97261754, 0.96917268, 0.97422316); # knmc: 
+# baseline: 8.20830869973577 if we use C(abc)/C(ab*)
+my @C = (undef, undef, 0.12264181, 0.48531058, 0.73285371, 0.8485226);
 
-my @KNMOD = 			# 7.80310938385546 on 1k, 7.85546292193106 on brown.gtok.nounk
+# baseline2: 8.36994337610673 if we use C(abc)/C(ab)
+# my @C = (undef, undef, 0.11574071, 0.48960756, 0.77180766, 0.89962748);
+
+# cdiscount: 8.74236257742229 using C(ab*) for denominator
+my @E = (undef, undef, 0.94914893, 0.99209517, 0.99951819, 0.99995625);
+
+# cdiscount2: 8.23573621678019 (1k) using C(ab) for denominator
+# my @E = (undef, undef, 0.58301752, 0.79111861, 0.92800359, 0.9840277);
+
+# kn: 8.46259231435588 (1k=8.40261215945863) Using unmodified n1 counts.
+my @KN = (0.98520067, 0.8046389, 0.99577209, 0.91786366, 0.99933982, 0.98042218, 0.99996885);
+
+# kn1: 8.25961028092419 (1k=8.19656987210192) Using modified n1 counts.
+my @KN1 = (0.038962617, 0.9851726, 0.97914173, 0.99581479, 0.99992424, 0.99931418, 0.99985808, 0.99996568);
+
+# mc: 8.0477965326711 (1k=7.99946312536937)
+my @D = (undef, undef, 7.8440119, 6.6305746, 6.9277921, 7.3675802); 
+
+# kn3: 7.96264920962347 (1k=7.90877748764095) Use mc with kn backoff using modified n1 counts.
+my @KN3 = (0.020662374, 3.1924203, 0.95571439, 3.2104425, 0.99992424, 4.8814022, 0.9999869, 6.8346343);
+
+# kn4: 7.86311246273543 (1k=7.81034468881) Use dirichlet (A=K*mc) with no D discount with both kn and its backoff
+# Reported in paper
+my @KN4 = (0.119330390707, 3.192501, 0.156310135, 2.8096546125, 0.205351523914, 3.23767800788, 0.238121750327, 3.58515159429);
+
+# knmod: 7.85546292193106 (1k=7.80310938385546)
+# Best results
+my @KNMOD = 			# Use mc with both kn and its backoff
     (
+     # D = 1 for kn2, D=0 for kn
+
      # coef=(A+1)/(A+40) for kn2:
-     1.4368796,
+     #1.4368796,
+
+     # coef for kn2:
+     .05880943795777517957,
 
      # C2..C5 (x mc) for kn:	# C2..C4 (x n1modx_) for kn2:
      3.192501, 			1.3022398,
@@ -53,7 +82,9 @@ my %init_fn =
      'baseline' => \&init_baseline, 
      'kn' => \&init_kn, 
      'cdiscount' => \&init_cdiscount, 
-     'knmc' => \&init_knmc,
+     'kn1' => \&init_kn1,
+     'kn3' => \&init_kn3,
+     'kn4' => \&init_kn4,
      'knmod' => \&init_knmod,
      );
 
@@ -62,7 +93,9 @@ my %score_fn =
      'baseline' => \&score_baseline, 
      'kn' => \&score_kn, 
      'cdiscount' => \&score_cdiscount,
-     'knmc' => \&score_knmc,
+     'kn1' => \&score_kn1,
+     'kn3' => \&score_kn3,
+     'kn4' => \&score_kn4,
      'knmod' => \&score_knmod,
      );
 
@@ -92,7 +125,7 @@ my %config =
      patterns => 0,
      random => 0,
      simplex => 0,
-     smoothing => 'knmod', # { baseline, mc, mcmod, kn, cdiscount, knmc, wbdiscount, knmod }
+     smoothing => 'knmod', # { baseline, mc, kn, cdiscount, kn1, kn3, kn4, wbdiscount, knmod }
      string => '',
      verbose => 0,
      verify => '',
@@ -241,12 +274,30 @@ sub init_kn {
     return $init;
 }
 
-sub init_knmc {
+sub init_kn1 {
     my $init;
-    my $ndims = 2 * $config{ngram} - 3;
+    my $ndims = 2 * $config{ngram} - 2;
     $init = $config{zeroes} ? ones($ndims) 
 	: $config{random} ? random($ndims)
-	: pdl(@KNMC[0 .. $ndims-1]);
+	: pdl(@KN1[0 .. $ndims-1]);
+    return $init;
+}
+
+sub init_kn3 {
+    my $init;
+    my $ndims = 2 * $config{ngram} - 2;
+    $init = $config{zeroes} ? ones($ndims) 
+	: $config{random} ? random($ndims)
+	: pdl(@KN3[0 .. $ndims-1]);
+    return $init;
+}
+
+sub init_kn4 {
+    my $init;
+    my $ndims = 2 * $config{ngram} - 2;
+    $init = $config{zeroes} ? ones($ndims) 
+	: $config{random} ? random($ndims)
+	: pdl(@KN4[0 .. $ndims-1]);
     return $init;
 }
 
@@ -302,7 +353,9 @@ sub score_cdiscount {
     my $x = shift;
     $nscore++;
     for (my $i = 2; $i <= $config{ngram}; $i++) {
-	$E[$i] = zero_one($x->at($i - 2));
+	my $xi = $x->at($i-2);
+	if ($xi < 0 or $xi > 1) { return $infinity; }
+	$E[$i] = $xi;
     }
     my $bits = ngram();
     warn "score[$nscore]: $bits $x\n";
@@ -323,14 +376,48 @@ sub score_kn {
     return $bits;
 }
 
-sub score_knmc {			
+sub score_kn1 {			
     my $x = shift;
     $nscore++;
     for (my $i = 0; $i < $x->nelem; $i++) {
-	if ($x->at($i) < 0 or $x->at($i) > 1) {
+	if ($x->at($i) < 0 or ($i > 0 and $x->at($i) > 1)) {
 	    return $infinity;
 	}
-	$KNMC[$i] = $x->at($i);
+	$KN1[$i] = $x->at($i);
+    }
+    my $bits = ngram();
+    warn "score[$nscore]: $bits $x\n";
+    return $bits;
+}
+
+sub score_kn3 {			
+    my $x = shift;
+    $nscore++;
+    for (my $i = 0; $i < $x->nelem; $i++) {
+	my $xi = $x->at($i);
+	if ($xi < 0) {
+	    return $infinity;
+	} elsif ($i > 0 && $i%2 == 0 && $xi > 1) {
+	    return $infinity;
+	}
+	$KN3[$i] = $xi;
+    }
+    my $bits = ngram();
+    warn "score[$nscore]: $bits $x\n";
+    return $bits;
+}
+
+sub score_kn4 {			
+    my $x = shift;
+    $nscore++;
+    for (my $i = 0; $i < $x->nelem; $i++) {
+	my $xi = $x->at($i);
+	if ($xi < 0) {
+	    return $infinity;
+	} elsif ($i == 0 and ($xi < 1/40 or $xi > 1)) {
+	    return $infinity;
+	}
+	$KN4[$i] = $xi;
     }
     my $bits = ngram();
     warn "score[$nscore]: $bits $x\n";
@@ -343,6 +430,8 @@ sub score_knmod {
     for (my $i = 0; $i < $x->nelem; $i++) {
 	my $xi = $x->at($i);
 	if ($xi < 0) {
+	    return $infinity;
+	} elsif ($i == 0 and $xi > 1) {
 	    return $infinity;
 	}
 	$KNMOD[$i] = $xi;
@@ -484,9 +573,6 @@ sub bits {
 	my $extra = $D[$n] * $missing_count;
 	$extra = 1 if $extra == 0;
 	warn "mc($s->[$i],$i,$n): mc=$missing_count x D=$D[$n] = $extra\n" if $config{debug};
-	if ($config{smoothing} eq 'mcmod') {
-	    $px = mc2($s, $i, $n-1);
-	}
 	$pb = ($gb + $px * $extra)
 	    / ($gc + $extra);
 	warn "mc($s->[$i],$i,$n): (nxy=$gb + px=$px * $extra) / (nx_=$gc + $extra) = $pb\n" if $config{debug};
@@ -496,28 +582,22 @@ sub bits {
 	    if $gc > 0;
     } elsif ($config{smoothing} eq 'cdiscount') {
 	my $D = 40 * $E[$n];
- 	if ($ga == 0) {
- 	    $pb = $px;
- 	} elsif ($gb == 0) {
- 	    $pb = $px * ($D * n1($c) + $missing_count) / $ga;
- 	} else {
- 	    $gb -= $D;
- 	    $pb = $gb / $ga;
- 	    $pb += $px * ($D * n1($c) + $missing_count) / $ga;
- 	}
+#  	if ($ga == 0) {
+#  	    $pb = $px;
+# 	} else {
+# 	    $pb = (($gb > 0) ? ($gb - $D) : 0) / $ga +
+# 		$px * ($D * n1($c) + $missing_count) / $ga;
+#  	}
 
 # The following gives horrible results
 # It seems important to take mc into account
 
-# 	if ($gc == 0) {
-# 	    $pb = $px;
-# 	} elsif ($gb == 0) {
-# 	    $pb = $px * ($D * n1($c)) / $gc;
-# 	} else {
-#  	    $gb -= $D;
-#  	    $pb = $gb / $gc;
-#  	    $pb += $px * ($D * n1($c)) / $gc;
-# 	}
+ 	if ($gc == 0) {
+ 	    $pb = $px;
+	} else {
+ 	    $pb = (($gb > 0) ? ($gb - $D) : 0) / $gc +
+ 		$px * ($D * n1($c)) / $gc;
+ 	}
 
     } elsif ($config{smoothing} eq 'wbdiscount') {
 
@@ -596,7 +676,11 @@ sub kn {
     $nx = n0($x);
     $nx_ = n0($x . ' _');
     $mc = $nx - $nx_;
-    if ($nx == 0) {		#DBG - this should be nx_
+    if (($nx == 0) or
+	(($nx_ == 0) and 
+	 (($config{smoothing} eq 'kn') or
+	  ($config{smoothing} eq 'kn1'))))
+    {
 	warn("kn($y,$i,$n): nx=0 for [$x]\n") if $config{debug};
 	return kn($s, $i, $n-1);
     } elsif ((" $x " =~ / [;!?.] /)
@@ -607,8 +691,10 @@ sub kn {
     }	
 
     my $kn0 = ($config{smoothing} eq 'kn') ? kn0($s, $i, $n-1) : 
-	($config{smoothing} eq 'knmc') ? kn1($s, $i, $n-1) :
+	($config{smoothing} eq 'kn1') ? kn1($s, $i, $n-1) :
 	($config{smoothing} eq 'knmod') ? kn2($s, $i, $n-1) :
+	($config{smoothing} eq 'kn3') ? kn3($s, $i, $n-1) :
+	($config{smoothing} eq 'kn4') ? kn4($s, $i, $n-1) :
 	die "KN: Unknown smoothing $config{smoothing}";
     warn("kn($y,$i,$n): kn0 = $kn0\n") if $config{debug};
 
@@ -616,49 +702,43 @@ sub kn {
     warn("kn($y,$i,$n): ML: nxy = $nxy / nx = $nx => ".($nxy/$nx)."\n") if $config{debug};
     warn("kn($y,$i,$n): nx=$nx nx_=$nx_ mc=$mc\n") if $config{debug};
 
-#   This gave us less than a cent:
-#     $D = $MINNGRAM * 
-# 	(($config{smoothing} eq 'kn') ? $KN[2*$n-4] :
-# 	 ($config{smoothing} eq 'knmc') ? $KNMC[2*$n-4] :
-# 	 ($config{smoothing} eq 'knmod') ? $KNMOD[3*$n-4] :
-# 	 die "Bad smoothing [$config{smoothing}]");
-#     warn("kn($y,$i,$n): D = $D\n") if $config{debug};
-#     $nxy -= $D if $nxy > 0;
-
     $n1x_ = n1("$x _");
     warn("kn($y,$i,$n): n1x_ = $n1x_\n") if $config{debug};
     warn("kn($y,$i,$n): x = [$x] nx = $nx\n") if $config{debug};
     warn("kn($y,$i,$n): mc = $mc\n") if $config{debug};
 
-    # Original formulation:
-    #$kn = $nxy / $nx + (($mc + $n1x_ * $D) / $nx) * $kn0;
+    if ($config{smoothing} eq 'kn') {
+	$D = $MINNGRAM * $KN[2*$n-4];
+	warn("kn($y,$i,$n): D = $D\n") if $config{debug};
+	$kn = ($nxy == 0 ? 0 : $nxy - $D) / $nx_ +
+	    $kn0 * $n1x_ * $D / $nx_;
+	
+    } elsif ($config{smoothing} eq 'kn1') {
+	$D = $MINNGRAM * $KN1[2*$n-3];
+	warn("kn($y,$i,$n): D = $D\n") if $config{debug};
+	$kn = ($nxy == 0 ? 0 : $nxy - $D) / $nx_ +
+	    $kn0 * $n1x_ * $D / $nx_;
+	
+    } elsif ($config{smoothing} eq 'kn3') {
+	my $extra = $KN3[2*$n-3] * $mc;
+	$extra = 1 if $extra == 0;
+	$kn = ($nxy + $kn0 * $extra) / ($nx_ + $extra);
 
-    # Using nx_ for denominator instead of nx, makes it worse.
-    #if ($nx_ == 0) { return kn($s, $i, $n-1); }
-    #$kn = $nxy / $nx_ + $kn0 * $D * $n1x_ / $nx_;
+    } elsif ($config{smoothing} eq 'kn4') {
+	my $extra = $KN4[2*$n-3] * $mc;
+	$extra = 1 if $extra == 0;
+	$kn = ($nxy + $kn0 * $extra) / ($nx_ + $extra);
 
-    # mc formulation
-    #my $extra = $KNMOD[$n+2] * $mc;  #7.8232
-    #7.82316150800905 <= [0.34999882 0.058431153  0.3384098 0.71771877  3.1924666  3.0841902   3.838957  4.1892848]
+    } elsif ($config{smoothing} eq 'knmod') {
+	my $extra = $KNMOD[2*$n-3] * $mc;
+	$extra = 1 if $extra == 0;
+	$kn = ($nxy + $kn0 * $extra) / ($nx_ + $extra);
 
-    #my $extra = $KNMOD[$n+2] * $nx_; #7.90
-    #7.90320385739 <= 0.262751247301 0.048686713198 0.27605715289 0.568193284213 0.088951456544 0.715625 1.73570024289 2.16562605758 ssize=-0.0123526471100327
-
-    #my $extra = $KNMOD[$n+2] * 100 * $n1x_; #7.8341
-    #7.8340994726598 <= [0.32673847 0.055480826 0.32197277 0.66516695  1.9684104  2.5096591  3.3671446  3.7403359]
-
-    my $extra = $KNMOD[2*$n-3] * $mc;
-    $extra = 1 if $extra == 0;
-
-    #orig: $kn = $nxy / $nx + (($mc + $n1x_ * $D) / $nx) * $kn0;
-    #modf: $kn = ($nxy  + $kn0 * $extra) / ($nx_ + $extra);
-    #equiv: $kn = ($nxy + $kn0 * ($extra + $n1x_ * $D)) / ($nx + $extra - $mc);
-    #withD: $kn = ($nxy + $kn0 * ($extra + $n1x_ * $D)) / ($nx_ + $extra);
-
-    $kn = ($nxy + $kn0 * $extra) / ($nx_ + $extra);
+    } else {
+	die "$config{smoothing} is not implemented.";
+    }
 
     die "nxy=$nxy kn0=$kn0 mc=$mc nx_=$nx_ nx=$nx kn=0" if $kn == 0;
-
     warn("kn($y,$i,$n): kn = $kn\n") if $config{debug};
     if ($config{patterns}) { 
 	# if outputting patterns do the lower order models as well
@@ -666,6 +746,38 @@ sub kn {
     }
     return $kn;
 }
+
+# kn experiments:
+	# Original formulation:
+	#$kn = $nxy / $nx + (($mc + $n1x_ * $D) / $nx) * $kn0;
+
+	# Using nx_ for denominator instead of nx, makes it worse.
+	#if ($nx_ == 0) { return kn($s, $i, $n-1); }
+	#$kn = $nxy / $nx_ + $kn0 * $D * $n1x_ / $nx_;
+
+	# mc formulation
+	#my $extra = $KNMOD[$n+2] * $mc;  #7.8232
+	#7.82316150800905 <= [0.34999882 0.058431153  0.3384098 0.71771877  3.1924666  3.0841902   3.838957  4.1892848]
+
+	#my $extra = $KNMOD[$n+2] * $nx_; #7.90
+	#7.90320385739 <= 0.262751247301 0.048686713198 0.27605715289 0.568193284213 0.088951456544 0.715625 1.73570024289 2.16562605758 ssize=-0.0123526471100327
+
+	#my $extra = $KNMOD[$n+2] * 100 * $n1x_; #7.8341
+	#7.8340994726598 <= [0.32673847 0.055480826 0.32197277 0.66516695  1.9684104  2.5096591  3.3671446  3.7403359]
+
+	#orig: $kn = $nxy / $nx + (($mc + $n1x_ * $D) / $nx) * $kn0;
+	#modf: $kn = ($nxy  + $kn0 * $extra) / ($nx_ + $extra);
+	#equiv: $kn = ($nxy + $kn0 * ($extra + $n1x_ * $D)) / ($nx + $extra - $mc);
+	#withD: $kn = ($nxy + $kn0 * ($extra + $n1x_ * $D)) / ($nx_ + $extra);
+
+
+# KN0: backoff function that uses unmodified n1 counts:
+# (kn) 	$D = $MINNGRAM * $KN[2*$n-4];
+# 	$kn = ($nxy == 0 ? 0 : $nxy - $D) / $nx_ +
+# 	    $kn0 * $n1x_ * $D / $nx_;
+# (kn0) $D = $KN[2*$n-3];
+#       $kn0 = ($n1_xy == 0 ? 0 : $n1_xy - $D) / $n1_x_ + 
+# 	    $px * $n2_x_ * $D / $n1_x_;
 
 sub kn0 {
     my ($s, $i, $n) = @_;
@@ -705,11 +817,12 @@ sub kn0 {
     warn("kn0($s->[$i],$i,$n): ML: n1_xy = $n1_xy / n1_x_ = $n1_x_ => ".($n1_xy/$n1_x_)."\n") if $config{debug};
     $D = $KN[2*$n-3];
     warn("kn0($s->[$i],$i,$n): D = $D\n") if $config{debug};
-    $n1_xy -= $D if $n1_xy > 0;
+    # $n1_xy -= $D if $n1_xy > 0;
     my $n2_x_ = n2("_ $x _");
     warn("kn0($s->[$i],$i,$n): n2_x_ = $n2_x_\n") if $config{debug};
 #    $kn0 = $n1_xy / $n1_x_ + ($n1x_ * $D / $n1_x_) * kn0($s, $i, $n-1);	#BUGGY
-    $kn0 = $n1_xy / $n1_x_ + ($n2_x_ * $D / $n1_x_) * $px;
+    $kn0 = ($n1_xy == 0 ? 0 : $n1_xy - $D) / $n1_x_ + 
+	$px * $n2_x_ * $D / $n1_x_;
 
     # new formula: does not really work
 #     my $n1x = myngram($x);
@@ -720,71 +833,149 @@ sub kn0 {
     return $kn0;
 }
 
+
+# KN1: backoff function that uses modified n1 counts:
+# (kn)	$D = $MINNGRAM * $KN1[2*$n-3];
+# 	$kn = ($nxy == 0 ? 0 : $nxy - $D) / $nx_ +
+# 	    $kn0 * $n1x_ * $D / $nx_;
+# (kn1)	$D = $KN1[2*$n-2];
+# 	$kn1 = ($n1_xy == 0 ? 0 : $n1_xy - $D) / $n1_x_ + 
+# 	    $p0 * $n1x_ * $D / $n1_x_;
+
 sub kn1 {
     my ($s, $i, $n) = @_;
-    warn("kn1($s->[$i],$i,$n): hello\n") if $config{debug};
-    if ($n <= 0) {
+    my $y = $s->[$i];
+    my $coef = ($KN1[0] + 1)/($KN1[0] + 40);
+    my ($x, $n1_xy, $n1_x_, $D, $kn1);
+    if ($n < 0) {
+	die "Bad n [$n]";
+    } elsif ($n == 0) {
+	# return 1/n1('_');
 	die "Bad n [$n]";
     } elsif ($n == 1) {
-	my $n0y = n0($s->[$i]);
-	my $n0_y = n0("_ $s->[$i]");
-	my $mc = $n0y - $n0_y;
-	$mc = 1 if $mc == 0;	# BUG
-	my $n0_ = n0('_');
-	my $n0__ = n0('_ _');
-	my $MC = $n0_ - $n0__;
-	return $mc/$MC;
+	my $n1_y = n1('_ ' . $y);
+	if ($n1_y == 0) {
+	    warn("kn1($y,$i,$n): n1_y($y) == 0\n") if $config{debug};
+	    # BUG: verify that this is exactly what would happen if we smoothed with a 0-order 1/V model
+	    $n1_y = 1;
+	}
+	my $n1__ = n1('_ _');
+	warn("kn1($y,$i,$n): n1_y=$n1_y / n1__=$n1__ => ".($n1_y/$n1__)."\n") if $config{debug};
+	return $n1_y / $n1__;
     }
     die if $n <= 1;
-    my $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
-    my $n0x_ = n0("$x _");
-    my $n0_x_ = n0("_ $x _");
-    my $MC = $n0x_ - $n0_x_;
-    
-    if ($n0x_ == 0) {
-	return kn1($s, $i, $n-1);
-    } elsif ((" $x " =~ / [;!?.] /)
-	     and not ($x =~ /^[^;!?.]*[;!?.]$/ and $s->[$i] eq '</S>'))
-    { # bad context
-	return kn1($s, $i, $n-1);
-    }	
-    elsif ($MC == 0) {
-	# BUG: don't know what to do here exactly
-	# warn "KN1 zero denominator [$x]";
-	return kn1($s, $i, $n-1);
-    }
-    
-    my $n0xy = n0("$x $s->[$i]");
-    my $n0_xy = n0("_ $x $s->[$i]");
-    my $mc = $n0xy - $n0_xy;
-    my $D = $KNMC[2*$n-3];
-    $mc -= $D if $mc > 0;
-    my $n1x_ = n1("$x _");
-    
-    my $kn1 = $mc / $MC + ($n1x_ * $D / $MC) * kn1($s, $i, $n-1);
 
-    warn("kn1($s->[$i],$i,$n): kn1 = $kn1\n") if $config{debug};
+    my $p0 = kn1($s, $i, $n-1);
+
+    $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
+    $n1_x_ = n1mod("_ $x _", $coef);
+    if ($n1_x_ == 0) {
+	warn("kn1($y,$i,$n): n1_x_ = $n1_x_\n") if $config{debug};
+	return $p0;
+    } elsif ((" $x " =~ / [;!?.] /)
+	     and not ($x =~ /^[^;!?.]*[;!?.]$/ and $y eq '</S>'))
+    { # bad context
+	warn("kn1($y,$i,$n): n1_x_ = $n1_x_ bad x=[$x]\n") if $config{debug};
+	return $p0;
+    }	
+    die "KN1 zero denominator [$x]" if $n1_x_ == 0;
+
+    $n1_xy = n1mod("_ $x $y", $coef);
+    warn("kn1($y,$i,$n): ML: n1_xy = $n1_xy / n1_x_ = $n1_x_ => ".($n1_xy/$n1_x_)."\n") if $config{debug};
+    $D = $KN1[2*$n-2];
+    warn("kn1($y,$i,$n): D = $D\n") if $config{debug};
+    # $n1_xy -= $D if $n1_xy > 0;
+    my $n1x_ = n1("$x _");
+    $kn1 = ($n1_xy == 0 ? 0 : $n1_xy - $D) / $n1_x_ + 
+	$p0 * $n1x_ * $D / $n1_x_;
+
+    warn("kn1($y,$i,$n): kn1 = $kn1\n") if $config{debug};
     return $kn1;
 }
+
+# KN3: identical to kn1, but kn uses missing-count discounting
+# (kn)	my $extra = $KN3[2*$n-3] * $mc;
+# 	$extra = 1 if $extra == 0;
+# 	$kn = ($nxy + $kn0 * $extra) / ($nx_ + $extra);
+# (kn1)	$D = $KN3[2*$n-2];
+# 	$kn3 = ($n1_xy == 0 ? 0 : $n1_xy - $D) / $n1_x_ + 
+# 	    $p0 * $n1x_ * $D / $n1_x_;
+
+sub kn3 {
+    my ($s, $i, $n) = @_;
+    my $y = $s->[$i];
+    my $coef = ($KN3[0] + 1)/($KN3[0] + 40);
+    my ($x, $n1_xy, $n1_x_, $D, $kn3);
+    if ($n < 0) {
+	die "Bad n [$n]";
+    } elsif ($n == 0) {
+	# return 1/n1('_');
+	die "Bad n [$n]";
+    } elsif ($n == 1) {
+	my $n1_y = n1('_ ' . $y);
+	if ($n1_y == 0) {
+	    warn("kn3($y,$i,$n): n1_y($y) == 0\n") if $config{debug};
+	    # BUG: verify that this is exactly what would happen if we smoothed with a 0-order 1/V model
+	    $n1_y = 1;
+	}
+	my $n1__ = n1('_ _');
+	warn("kn3($y,$i,$n): n1_y=$n1_y / n1__=$n1__ => ".($n1_y/$n1__)."\n") if $config{debug};
+	return $n1_y / $n1__;
+    }
+    die if $n <= 1;
+
+    my $p0 = kn3($s, $i, $n-1);
+
+    $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
+    $n1_x_ = n1mod("_ $x _", $coef);
+    if ($n1_x_ == 0) {
+	warn("kn3($y,$i,$n): n1_x_ = $n1_x_\n") if $config{debug};
+	return $p0;
+    } elsif ((" $x " =~ / [;!?.] /)
+	     and not ($x =~ /^[^;!?.]*[;!?.]$/ and $y eq '</S>'))
+    { # bad context
+	warn("kn3($y,$i,$n): n1_x_ = $n1_x_ bad x=[$x]\n") if $config{debug};
+	return $p0;
+    }	
+    die "KN3 zero denominator [$x]" if $n1_x_ == 0;
+
+    $n1_xy = n1mod("_ $x $y", $coef);
+    warn("kn3($y,$i,$n): ML: n1_xy = $n1_xy / n1_x_ = $n1_x_ => ".($n1_xy/$n1_x_)."\n") if $config{debug};
+    $D = $KN3[2*$n-2];
+    warn("kn3($y,$i,$n): D = $D\n") if $config{debug};
+    # $n1_xy -= $D if $n1_xy > 0;
+    my $n1x_ = n1("$x _");
+    $kn3 = ($n1_xy == 0 ? 0 : $n1_xy - $D) / $n1_x_ + 
+	$p0 * $n1x_ * $D / $n1_x_;
+
+    warn("kn3($y,$i,$n): kn3 = $kn3\n") if $config{debug};
+    return $kn3;
+}
+
+# KN2: both kn and kn2 uses missing-count discounting
+# (kn)	my $extra = $KNMOD[2*$n-3] * $mc;
+# 	$extra = 1 if $extra == 0;
+# 	$kn = ($nxy + $kn0 * $extra) / ($nx_ + $extra);
+# (kn2)	$D = 1;
+#	$C = $KNMOD[2*$n-2];
+#       $kn2 = ($n1_xy == 0 ? 0 : $n1_xy - $D) / ($C * $n1modx_ + $n1_x_) + 
+#	       $p0 * ($C * $n1modx_ + $n1x_ * $D) / ($C * $n1modx_ + $n1_x_);
 
 sub kn2 {
     my ($s, $i, $n) = @_;
     my $y = $s->[$i];
-    my $coef = ($KNMOD[0] + 1)/($KNMOD[0] + 40);
+    my $coef = $KNMOD[0];
     if ($n <= 0) {
 	die "Bad n [$n]";
     } elsif ($n == 1) {
-	my $n1_y = n1mod("_ $y", $coef);
+	# we do not use the modified n1 count here.
+	my $n1_y = n1("_ $y", $coef);
 	if ($n1_y == 0) {
 	    warn("kn2($y,$i,$n): n1_y($y) == 0\n") if $config{debug};
 	    # BUG: verify that this is exactly what would happen if we smoothed with a 0-order 1/V model
 	    $n1_y = 1;
 	}
-	my $n1__ = n1mod('_ _', $coef);
-
-	# OK, let's not use the extension here, gives better results:
-	$n1_y = (n1("_ $y") or 1);
-	$n1__ = n1("_ _");
+	my $n1__ = n1('_ _', $coef);
 
 	warn("kn2($y,$i,$n): n1_y=$n1_y / n1__=$n1__ => ".($n1_y/$n1__)."\n") if $config{debug};
 	return $n1_y / $n1__;
@@ -807,40 +998,115 @@ sub kn2 {
     my $n1_xy = n1mod("_ $x $y", $coef);
     die "n1_xy=$n1_xy" if ($n1_xy > 0 and $n1_xy < 1);
     warn("kn2($y,$i,$n): ML: n1_xy = $n1_xy / n1_x_ = $n1_x_ => ".($n1_xy/$n1_x_)."\n") if $config{debug};
-#    my $D = $KNMOD[$n+6];
-#    $D = 1 if $D > 1;
-    my $D = 1;			# optimization gives 1.
-    warn("kn2($y,$i,$n): D = $D\n") if $config{debug};
-    $n1_xy -= $D if $n1_xy > 0;
 
     my $n1x_ = n1("$x _");
     warn("kn2($y,$i,$n): n1x_ = $n1x_\n") if $config{debug};
 
+    my $D = 1;			# optimization gives 1.
     my $C = $KNMOD[2*$n-2];
-
     my $n1modx_ = n1mod("$x _");
-    my $kn2 = ($n1_xy + $p0 * ($C * $n1modx_ + $D * $n1x_)) / ($C * $n1modx_ + $n1_x_);
+    warn("kn2($y,$i,$n): D = $D C = $C n1modx_ = $n1modx_\n") if $config{debug};
 
-#7.8232 my $kn2 = ($n1_xy + $p0 * ($C * $n1_x_ + $D * $n1x_)) / ($C * $n1_x_ + $n1_x_);
-#7.82316150800905 <= [0.34999882 0.058431153  0.3384098 0.71771877  3.1924666  3.0841902   3.838957  4.1892848]
+    my $kn2 = ($n1_xy == 0 ? 0 : $n1_xy - $D) / ($C * $n1modx_ + $n1_x_) + 
+	$p0 * ($C * $n1modx_ + $n1x_ * $D) / ($C * $n1modx_ + $n1_x_);
+    warn("kn2($y,$i,$n): kn2 = $kn2\n") if $config{debug};
+    return $kn2;
+}
+
+# kn2 experiments:
+#
+# Note that KNMOD[0] in some old experiments was interpreted not as
+# the coef itself but as coef = (1+A)/(40+A)
+#
+#    my $n1modx_ = n1mod("$x _");# *run4*
+#7.8031 my $kn2 = ($n1_xy + $p0 * ($C * $n1modx_ + $D * $n1x_)) / ($C * $n1modx_ + $n1_x_);	# *run4*
+#(D=1): 7.80310938385236 <= [ 1.4369137  1.3023956  2.0387025  2.4608132  3.1924666  2.9146141  3.4571246  3.9006402]
+#(D=0): 7.8093857188333 <= [ 3.5378598   3.192501  3.0752446  2.8224962  4.4838955  3.2652199   5.410972  3.6069656]
 
 #7.8072 my $kn2 = ($n1_xy + $p0 * ($C * $n1x_ + $D * $n1x_)) / ($C * $n1x_ + $n1_x_); #*run*
 #7.80719881238559 <= [ 1.1273339  2.5163229  4.8874927  6.8448645  3.1924666  2.9414249  3.5130246  3.9000424]
-
-#    my $n1modx_ = n1mod("$x _");# *run4*
-#7.8031 my $kn2 = ($n1_xy + $p0 * ($C * $n1modx_ + $D * $n1x_)) / ($C * $n1modx_ + $n1_x_);	# *run4*
-#7.80310938385236 <= [ 1.4369137  1.3023956  2.0387025  2.4608132  3.1924666  2.9146141  3.4571246  3.9006402]
-
-#    my $n1_x = n1("_ $x");	# *run2*
-#7.8162 my $kn2 = ($n1_xy + $p0 * ($C * $n1_x + $D * $n1x_)) / ($C * $n1_x + $n1_x_); #*run2*
-#7.81622506825492 <= [0.56228426   1.422944  3.5268414  5.2919063  3.1924666  3.0078189  3.6986144  4.2018432]
 
 #    my $n1mod_x = n1mod("_ $x");	# *run3*
 #7.8149 my $kn2 = ($n1_xy + $p0 * ($C * $n1mod_x + $D * $n1x_)) / ($C * $n1mod_x + $n1_x_); #*run3*
 #7.81492091713032 <= [0.59317426 0.63644359  1.3401929  1.8563427  3.1924666  2.9976826  3.6738253  4.2409812]
 
-    warn("kn2($y,$i,$n): kn2 = $kn2\n") if $config{debug};
-    return $kn2;
+#    my $n1_x = n1("_ $x");	# *run2*
+#7.8162 my $kn2 = ($n1_xy + $p0 * ($C * $n1_x + $D * $n1x_)) / ($C * $n1_x + $n1_x_); #*run2*
+#7.81622506825492 <= [0.56228426   1.422944  3.5268414  5.2919063  3.1924666  3.0078189  3.6986144  4.2018432]
+
+#7.8232 my $kn2 = ($n1_xy + $p0 * ($C * $n1_x_ + $D * $n1x_)) / ($C * $n1_x_ + $n1_x_);
+#7.82316150800905 <= [0.34999882 0.058431153  0.3384098 0.71771877  3.1924666  3.0841902   3.838957  4.1892848]
+
+
+# KN4: both kn and kn4 uses missing-count discounting
+# (kn)	my $extra = $KN4[2*$n-3] * $mc;
+# 	$extra = 1 if $extra == 0;
+# 	$kn = ($nxy + $kn0 * $extra) / ($nx_ + $extra);
+# (kn4)	$extra = $KN4[2*$n-2] * $mc;
+# (D=1) $kn4 = ($n1_xy == 0 ? 0 : $n1_xy - $D) / ($extra + $n1_x_) + 
+#	       $p0 * ($extra + $n1x_ * $D) / ($extra + $n1_x_);
+# (D=0)	$kn4 = $n1_xy / ($extra + $n1_x_) + 
+# 		$p0 * $extra / ($extra + $n1_x_);
+
+#7.8038 my $kn2 = ($n1_xy + $p0 * ($extra + $D * $n1x_)) / ($extra + $n1_x_);
+#(D=1): 7.80377791076084 <= [0.059170783  3.1925007 0.058437701  2.9088102 0.082038069  3.4459117 0.094556554  3.9088292]
+#(D=0):	7.81034498858537 [0.11966381   3.192501 0.15670076  2.8094593 0.20582305   3.237459 0.23886949  3.5852088]
+
+sub kn4 {
+    my ($s, $i, $n) = @_;
+    my $y = $s->[$i];
+    my $coef = $KN4[0];
+    if ($n <= 0) {
+	die "Bad n [$n]";
+    } elsif ($n == 1) {
+	#my $n1_y = n1mod("_ $y", $coef);
+	my $n1_y = n1("_ $y", $coef);
+	if ($n1_y == 0) {
+	    warn("kn4($y,$i,$n): n1_y($y) == 0\n") if $config{debug};
+	    # BUG: verify that this is exactly what would happen if we smoothed with a 0-order 1/V model
+	    $n1_y = 1;
+	}
+	#my $n1__ = n1mod('_ _', $coef);
+	my $n1__ = n1('_ _', $coef);
+
+	warn("kn4($y,$i,$n): n1_y=$n1_y / n1__=$n1__ => ".($n1_y/$n1__)."\n") if $config{debug};
+	return $n1_y / $n1__;
+    }
+
+    my $p0 = kn4($s, $i, $n-1);
+
+    my $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
+    my $n1_x_ = n1mod("_ $x _", $coef);
+    if ($n1_x_ == 0) {
+	warn("kn4($y,$i,$n): n1_x_ = $n1_x_\n") if $config{debug};
+	return $p0;
+    } elsif ((" $x " =~ / [;!?.] /)
+	     and not ($x =~ /^[^;!?.]*[;!?.]$/ and $y eq '</S>'))
+    { # bad context
+	warn("kn4($y,$i,$n): n1_x_ = $n1_x_ bad [$x]\n") if $config{debug};
+	return $p0;
+    }	
+
+    my $n1_xy = n1mod("_ $x $y", $coef);
+    die "n1_xy=$n1_xy" if ($n1_xy > 0 and $n1_xy < 1);
+    warn("kn4($y,$i,$n): ML: n1_xy = $n1_xy / n1_x_ = $n1_x_ => ".($n1_xy/$n1_x_)."\n") if $config{debug};
+
+    my $n1x_ = n1("$x _");
+    warn("kn4($y,$i,$n): n1x_ = $n1x_\n") if $config{debug};
+
+    # my $D = 1;			# optimization gives 1.
+    # warn("kn4($y,$i,$n): D = $D\n") if $config{debug};
+
+    my $mc = n0($x) - n0("$x _");
+    my $extra = $KN4[2*$n-2] * $mc;
+    $extra = 1 if $extra == 0;
+
+#     my $kn4 = ($n1_xy == 0 ? 0 : $n1_xy - $D) / ($extra + $n1_x_) + 
+# 	$p0 * ($extra + $n1x_ * $D) / ($extra + $n1_x_);
+    my $kn4 = $n1_xy / ($extra + $n1_x_) + 
+ 	$p0 * $extra / ($extra + $n1_x_);
+    warn("kn4($y,$i,$n): kn4 = $kn4\n") if $config{debug};
+    return $kn4;
 }
 
 sub n1mod {
@@ -855,58 +1121,6 @@ sub n1mod {
     $pat =~ s/\s*_\s*//;
     my $n0x = n0($pat);
     return $n1 + $coef * ($n0x - $n0);
-}
-
-sub mc2 {
-    my ($s, $i, $n) = @_;
-    if ($n <= 0) {
-	die "Bad n [$n]";
-    } elsif ($n == 1) {
-	my $n1_y = n1mod("_ $s->[$i]");
-	if ($n1_y == 0) {
-	    warn("mc2($s->[$i],$i,$n): n1_y($s->[$i]) == 0\n") if $config{debug};
-	    # BUG: verify that this is exactly what would happen if we smoothed with a 0-order 1/V model
-	    $n1_y = 1;
-	}
-	my $n1__ = n1mod('_ _');
-
-	# BUG: OK, let's not use the extension here:
-	$n1_y = (n1("_ $s->[$i]") or 1);
-	$n1__ = n1("_ _");
-	#$n1_y = n0($s->[$i]);
-	#$n1__ = n0('_');
-
-	warn("mc2($s->[$i],$i,$n): n1_y=$n1_y / n1__=$n1__ => ".($n1_y/$n1__)."\n") if $config{debug};
-	return $n1_y / $n1__;
-    }
-
-    my $x = join(' ', @{$s}[($i-$n+1) .. ($i-1)]);
-    my $px = mc2($s, $i, $n-1);
-
-    my $n1_x_ = n1mod("_ $x _");
-    if ($n1_x_ == 0) {
-	warn("mc2($s->[$i],$i,$n): n1_x_ = $n1_x_\n") if $config{debug};
-	return $px;
-    } elsif ((" $x " =~ / [;!?.] /)
-	     and not ($x =~ /^[^;!?.]*[;!?.]$/ and $s->[$i] eq '</S>'))
-    { # bad context
-	warn("mc2($s->[$i],$i,$n): n1_x_ = $n1_x_ bad [$x]\n") if $config{debug};
-	return $px;
-    }	
-    my $n1_xy = n1mod("_ $x $s->[$i]");
-    die "n1_xy=$n1_xy" if ($n1_xy > 0 and $n1_xy < 1);
-    warn("mc2($s->[$i],$i,$n): ML: n1_xy = $n1_xy / n1_x_ = $n1_x_ => ".($n1_xy/$n1_x_)."\n") if $config{debug};
-    #my $D = $KNMOD[2*$n-2];
-    warn("mc2($s->[$i],$i,$n): D = 1\n") if $config{debug};
-    $n1_xy -= 1 if $n1_xy > 0;
-
-    my $n1x_ = n1("$x _");
-    warn("mc2($s->[$i],$i,$n): n1x_ = $n1x_\n") if $config{debug};
-
-    my $mc2 = $n1_xy / $n1_x_ + $px * $n1x_ / $n1_x_;
-
-    warn("mc2($s->[$i],$i,$n): mc2 = $mc2\n") if $config{debug};
-    return $mc2;
 }
 
 sub dhc {
@@ -1068,9 +1282,9 @@ parameter optimization for the given -smoothing option.  The -patterns
 option outputs the patterns that the -counts file will need to contain
 in order to compute cross entropy.
 
-The valid smoothing options are: baseline, kn, knmc, knmod, mc, mcmod,
-cdiscount, wbdiscount.  Default is knmod, which gives 7.85 bits per
-word on the brown corpus.
+The valid smoothing options are: baseline, kn, knmod, mc, cdiscount,
+wbdiscount.  Default is knmod, which gives 7.85 bits per word on the
+brown corpus.
 
 =head1 OPTIONS
    -counts file		read counts from file
