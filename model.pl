@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.22 2008/01/30 12:04:02 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.23 2008/02/01 22:36:14 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -431,7 +431,7 @@ sub score_knmod {
 	my $xi = $x->at($i);
 	if ($xi < 0) {
 	    return $infinity;
-	} elsif ($i == 0 and $xi > 1) {
+	} elsif ($i == 0 and ($xi > 1 or $xi < 1/40)) {
 	    return $infinity;
 	}
 	$KNMOD[$i] = $xi;
