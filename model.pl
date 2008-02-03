@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.23 2008/02/01 22:36:14 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.24 2008/02/03 07:27:58 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -27,16 +27,22 @@ my @C = (undef, undef, 0.12264181, 0.48531058, 0.73285371, 0.8485226);
 # my @C = (undef, undef, 0.11574071, 0.48960756, 0.77180766, 0.89962748);
 
 # cdiscount: 8.74236257742229 using C(ab*) for denominator
-my @E = (undef, undef, 0.94914893, 0.99209517, 0.99951819, 0.99995625);
+#my @E = (undef, undef, 0.94914893, 0.99209517, 0.99951819, 0.99995625);
+# 3-gram does best: 8.52998951451499 (1k=8.46934122015906)
+my @E = (undef, undef, 0.94934424, 0.99209517);
 
 # cdiscount2: 8.23573621678019 (1k) using C(ab) for denominator
 # my @E = (undef, undef, 0.58301752, 0.79111861, 0.92800359, 0.9840277);
 
 # kn: 8.46259231435588 (1k=8.40261215945863) Using unmodified n1 counts.
-my @KN = (0.98520067, 0.8046389, 0.99577209, 0.91786366, 0.99933982, 0.98042218, 0.99996885);
+# my @KN = (0.98520067, 0.8046389, 0.99577209, 0.91786366, 0.99933982, 0.98042218, 0.99996885);
+# ngram=4 gives better results 8.40070320128183 (1k=8.33130330762054)
+my @KN = (0.98520067, 0.80424828, 0.99577209, 0.93954335, 0.99953513);
 
 # kn1: 8.25961028092419 (1k=8.19656987210192) Using modified n1 counts.
-my @KN1 = (0.038962617, 0.9851726, 0.97914173, 0.99581479, 0.99992424, 0.99931418, 0.99985808, 0.99996568);
+# my @KN1 = (0.038962617, 0.9851726, 0.97914173, 0.99581479, 0.99992424, 0.99931418, 0.99985808, 0.99996568);
+# ngram=4 gives better results 8.22729782692671 (1k=8.15830220985079)
+my @KN1 = (0.095564851, 0.9851726, 0.99995823, 0.99581479, 0.99992424, 0.99949497);
 
 # mc: 8.0477965326711 (1k=7.99946312536937)
 my @D = (undef, undef, 7.8440119, 6.6305746, 6.9277921, 7.3675802); 
@@ -102,6 +108,7 @@ my %score_fn =
 # Globals:
 
 my $ZERO_WARNING;
+my $LOWER_WARNING;
 my (%n0, %n1, %n2);
 my $nline = 0;
 my $nscore = 0;
@@ -581,7 +588,12 @@ sub bits {
 	$pb += (1 - $C[$n]) * ($gb / $gc)
 	    if $gc > 0;
     } elsif ($config{smoothing} eq 'cdiscount') {
-	my $D = 40 * $E[$n];
+	if ($n > 3) {
+	    warn "Warning: cdiscount does best with 3-grams, using lower order model\n"
+		unless $LOWER_WARNING++;
+	    $pb = $px;
+	} else {
+	    my $D = 40 * $E[$n];
 #  	if ($ga == 0) {
 #  	    $pb = $px;
 # 	} else {
@@ -589,16 +601,16 @@ sub bits {
 # 		$px * ($D * n1($c) + $missing_count) / $ga;
 #  	}
 
-# The following gives horrible results
+# The following gives horrible results if n > 3.
 # It seems important to take mc into account
 
- 	if ($gc == 0) {
- 	    $pb = $px;
-	} else {
- 	    $pb = (($gb > 0) ? ($gb - $D) : 0) / $gc +
- 		$px * ($D * n1($c)) / $gc;
- 	}
-
+	    if ($gc == 0) {
+		$pb = $px;
+	    } else {
+		$pb = (($gb > 0) ? ($gb - $D) : 0) / $gc +
+		    $px * ($D * n1($c)) / $gc;
+	    }
+	}
     } elsif ($config{smoothing} eq 'wbdiscount') {
 
 # This one gave 8.5773 on the 1k data:
@@ -688,7 +700,11 @@ sub kn {
     { # bad context
 	warn("kn($y,$i,$n): nx=$nx nx_=$nx_ bad [$x]\n") if $config{debug};
 	return kn($s, $i, $n-1);
-    }	
+    } elsif ($n == 5 and ($config{smoothing} eq 'kn' or $config{smoothing} eq 'kn1')) {
+	warn("Warning: $config{smoothing} does best with 4-grams, using lower order model\n")
+	    unless $LOWER_WARNING++;
+	return kn($s, $i, $n-1);
+    }
 
     my $kn0 = ($config{smoothing} eq 'kn') ? kn0($s, $i, $n-1) : 
 	($config{smoothing} eq 'kn1') ? kn1($s, $i, $n-1) :
