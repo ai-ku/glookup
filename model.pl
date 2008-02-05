@@ -1,22 +1,67 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.24 2008/02/03 07:27:58 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.25 2008/02/03 13:25:06 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
 use Pod::Usage;
 use PDL;
 use PDL::Opt::Simplex;
+my $oldfh = select(STDERR); $| = 1; select($oldfh); # fix pdl bug
 use Data::Dumper;
 require 'gtokenize.pl';
 require 'fileio.pl';
 
-my $oldfh = select(STDERR); $| = 1; select($oldfh); # fix pdl bug
+# Wildcard counts:
+#                        n0              n1              n2
+#         _              1024908267229   13588391        -
+#         _ _            910884463583    314843401       12880878
+#         _ _ _          739006848674    977069902       9329099
+#         _ _ _ _        528435661704    1333820466      7934066
+#         _ _ _ _ _      368402367169    1214460675      7015505
+
+# Configuration options:
+
+my %config = 
+    (
+     counts => undef,
+     debug => 0,
+     dhc => 0,
+     mincnt => 0,
+     ngram => 5,
+     optimize => 0,
+     patterns => 0,
+     random => 0,
+     simplex => 0,
+     smoothing => 'knmod', # { baseline, mc, kn, cdiscount, kn1, kn3, kn4, wbdiscount, knmod }
+     string => '',
+     verbose => 0,
+     verify => '',
+     zeroes => 0,
+     );
+
+# Globals:
+
+my (%n0, %n1, %n2);
+my $ZERO_WARNING;
+my $LOWER_WARNING;
+my %patterns;
+my $npatterns;
+my $MAX_PATTERNS = 10000000;
+my $GC_PATTERNS  = 1000000;
+my $nline = 0;
+my $nscore = 0;
+my $infinity = 1E9;
+my $epsilon = 1E-6;
+my $MINNGRAM = 40;
+my @corpus;
+
 my $log2 = log(2);
 sub log2 { log($_[0])/$log2; }
 sub exp2 { exp($_[0]*$log2); }
 my $log10 = log(10);
 #sub log10 { log($_[0])/$log10; } # defined in PDL
 sub exp10 { exp($_[0]*$log10); }
+
 
 # Discounting parameters:
 
@@ -73,14 +118,6 @@ my @KNMOD = 			# Use mc with both kn and its backoff
      3.9005968,
      );
 
-# Wildcard counts:
-#                        n0              n1              n2
-#         _              1024908267229   13588391        -
-#         _ _            910884463583    314843401       12880878
-#         _ _ _          739006848674    977069902       9329099
-#         _ _ _ _        528435661704    1333820466      7934066
-#         _ _ _ _ _      368402367169    1214460675      7015505
-
 # Optimization functions:
 
 my %init_fn = 
@@ -105,43 +142,13 @@ my %score_fn =
      'knmod' => \&score_knmod,
      );
 
-# Globals:
-
-my $ZERO_WARNING;
-my $LOWER_WARNING;
-my (%n0, %n1, %n2);
-my $nline = 0;
-my $nscore = 0;
-my $infinity = 1E9;
-my $epsilon = 1E-6;
-my $MINNGRAM = 40;
-my %myngram;
-my @corpus;
-
-
-# Configuration options:
-
-my %config = 
-    (
-     counts => undef,
-     debug => 0,
-     dhc => 0,
-     mincnt => 0,
-     ngram => 5,
-     optimize => 0,
-     patterns => 0,
-     random => 0,
-     simplex => 0,
-     smoothing => 'knmod', # { baseline, mc, kn, cdiscount, kn1, kn3, kn4, wbdiscount, knmod }
-     string => '',
-     verbose => 0,
-     verify => '',
-     zeroes => 0,
-     );
 
 # Main:
 
 main() if $0 =~ /\bmodel.pl$/;
+
+
+# Subroutines:
 
 sub main {
 
@@ -166,7 +173,7 @@ sub main {
     if ($config{counts}) {
 	warn sprintf("read_counts($config{counts})=>%d\n", read_counts($config{counts}));
     } elsif (not $config{patterns}) {
-	warn "Count file not specified, turning on patterns\n";
+	warn "Count file not specified, turning on pattern output\n";
 	$config{patterns} = 1;
     }
     if ($config{string}) {
@@ -207,7 +214,7 @@ sub main {
 
 # Subroutines:
 
-sub config {
+sub model_config {
     my ($href) = @_;
     while (my ($opt, $val) = each %$href) {
 	$config{$opt} = $val;
@@ -472,6 +479,7 @@ sub process_sentence {
     my $nword;
     my $nbits;
     if (!$config{patterns}) {
+	# Check for unknown words and skip sentence if found
 	for (my $i = 1; $i < $#{$s}; $i++) {
 	    if (n0($s->[$i]) == 0) { 
 		warn "Warning[$nline]: [$s->[$i]] unknown, skipping sentence.\n"
@@ -491,7 +499,7 @@ sub process_sentence {
 	    }
 	    printf "\t%.4f\n", $b;
 	}
-# The unknown word hack
+        # The unknown word hack, did not really gain that much.
   	if ($config{mincnt} and n0($s->[$i]) < $config{mincnt}) {
   	    $s->[$i] = '<UNK>';
   	}
@@ -841,7 +849,7 @@ sub kn0 {
 	$px * $n2_x_ * $D / $n1_x_;
 
     # new formula: does not really work
-#     my $n1x = myngram($x);
+#     my $n1x = patterns($x);
 #     my $mc = $n1x - $n1_x_;
 #     $kn0 = $n1_xy / $n1x + (($mc + $n1x_ * $D) / $n1x) * kn0($s, $i, $n-1);
 
@@ -1218,24 +1226,19 @@ sub dhc {
 }
 
 sub read_counts {
-    my $path = shift;
-    readfile($path, sub {
+    readfile($_[0], sub {
 	my ($pat, $n0, $n1, $n2) = @_;
 	die if not defined $pat;
 	die if not defined $n0;
 	$n0{$pat} = $n0;
 	$n1{$pat} = $n1 if defined $n1;
 	$n2{$pat} = $n2 if defined $n2;
-	print STDERR '.' unless $. % 100000;
     }, "\t");
-    return $n0{_};
 }
 
 sub n0 {
     my $pat = shift;
-    if ($config{patterns}) {
-	print "$pat\n" if 0 == $myngram{$pat}++;
-    } 
+    print "$pat\n" if $config{patterns} and not remember($pat);
     if (defined $n0{$pat}) {
 	return $n0{$pat};
     } else {
@@ -1247,9 +1250,7 @@ sub n0 {
 
 sub n1 {
     my $pat = shift;
-    if ($config{patterns}) {
-	print "$pat\n" if 0 == $myngram{$pat}++;
-    } 
+    print "$pat\n" if $config{patterns} and not remember($pat);
     if (defined $n1{$pat}) {
 	return $n1{$pat};
     } else {
@@ -1261,15 +1262,30 @@ sub n1 {
 
 sub n2 {
     my $pat = shift;
-    if ($config{patterns}) {
-	print "$pat\n" if 0 == $myngram{$pat}++;
-    } 
+    print "$pat\n" if $config{patterns} and not remember($pat);
     if (defined $n2{$pat}) {
 	return $n2{$pat};
     } else {
 	warn "[$pat] some patterns not found, using zero\n" 
 	    unless $ZERO_WARNING++;
 	return $config{patterns} ? 1 : 0;
+    }
+}
+
+sub remember {
+    my $pat = shift;
+    if ($patterns{$pat}++) {
+	return 1;
+    } else {
+	if ((++$npatterns >= $MAX_PATTERNS) and
+	    ($npatterns % $GC_PATTERNS == 0)) {
+	    # We need some garbage collection to limit memory use
+	    for (my $i = 0; $i < $GC_PATTERNS; $i++) {
+		my $key = each %patterns;
+		delete $patterns{$key} if defined $key;
+	    }
+	}
+	return 0;
     }
 }
 
