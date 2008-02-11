@@ -1,5 +1,5 @@
 /* -*- mode: C; mode: Outline-minor; outline-regexp: "/[*][*]+"; -*- */
-const char *rcsid = "$Id: glookup.c,v 1.9 2008/01/09 22:45:23 dyuret Exp dyuret $";
+const char *rcsid = "$Id: glookup.c,v 1.10 2008/01/29 06:47:38 dyuret Exp dyuret $";
 const char *help = "glookup [-a20] [-p google-ngram-path] < patterns > counts";
 
 #include <stdio.h>
@@ -16,13 +16,13 @@ const char *help = "glookup [-a20] [-p google-ngram-path] < patterns > counts";
 
 static char *path = ".";	/* google-ngram path */
 static int all_ngrams = 0;	/* whether to print all ngrams matching a wildcard pattern */
-static int no_n2 = 0;		/* whether to compute n2 (by default we do but it takes memory) */
+static int output_n2 = 0; 	/* whether to compute n2 (by default we do not it takes memory) */
 static int output_zero = 0;	/* whether to print out ngrams with zero count (default no) */
 
 static struct option long_options[] = {
   {"path", 1, 0, 'p'},
   {"all", 0, 0, 'a'},
-  {"no_n2", 0, 0, '2'},
+  {"output_n2", 0, 0, '2'},
   {"output_zero", 0, 0, '0'},
   {0, 0, 0, 0}
 };
@@ -35,7 +35,7 @@ void get_options(int argc, char *argv[]) {
     switch(c) {
     case 'p': path = optarg; break;
     case 'a': all_ngrams = 1; break;
-    case '2': no_n2 = 1; break;
+    case '2': output_n2 = 1; break;
     case '0': output_zero = 1; break;
     default: g_message(help); exit(0);
     }
@@ -130,7 +130,7 @@ typedef struct CounterS {
 
 Counter counter_new(Pattern pat) {
   Counter cnt = g_new0(struct CounterS, 1);
-  if (!no_n2) {
+  if (output_n2) {
     int nwild = ngram_count_wildcards(pat);
     if ((nwild > 1) &&
 	(pat[ngram_size(pat)] == ANY))
