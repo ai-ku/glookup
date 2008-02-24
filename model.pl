@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.25 2008/02/03 13:25:06 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.26 2008/02/05 13:43:17 dyuret Exp dyuret $ } ."\n";
 
 use strict;
 use Getopt::Long;
@@ -65,10 +65,10 @@ sub exp10 { exp($_[0]*$log10); }
 
 # Discounting parameters:
 
-# baseline: 8.20830869973577 if we use C(abc)/C(ab*)
+# baseline: 8.20830869973577 (1k=8.16175731002582) 
 my @C = (undef, undef, 0.12264181, 0.48531058, 0.73285371, 0.8485226);
 
-# baseline2: 8.36994337610673 if we use C(abc)/C(ab)
+# baseline2: 8.36994337610673 if we use C(abc)/C(ab) instead of C(abc)/C(ab*)
 # my @C = (undef, undef, 0.11574071, 0.48960756, 0.77180766, 0.89962748);
 
 # cdiscount: 8.74236257742229 using C(ab*) for denominator
@@ -518,12 +518,17 @@ sub read_corpus {
 }
 
 sub bits {
+    my $pb = &prob;
+    return ($pb > 0 ? -log2($pb) : $infinity);
+}
+
+sub prob {
     my ($s, $i, $n) = @_;
     $n = 5 if not defined $n;
     if ($config{smoothing} =~ /^kn/) {
 	my $pb = kn($s, $i, $n);
 	die "Kneser-Ney returned $pb" if $pb <= 0;
-	return -log2($pb);
+	return $pb;
     }
     if ($n == 1) {
 	my $g = n0($s->[$i]);
@@ -539,20 +544,19 @@ sub bits {
 	my $n_ = n0('_');
 	warn "p0($s->[$i],$i,$n): $g/$n_=".($g/$n_)."\n" if $config{debug};
 
-	return log2($n_ / $g);
+	return ($g / $n_);
     } elsif ($n > $i + 1) {
-	return bits($s, $i, $i+1);
+	return prob($s, $i, $i+1);
     }
 
     my $a = join(' ', @{$s}[($i-$n+1) .. ($i-1)]); # a = n-1 word prefix
     my $ga = n0($a);	# ga = count of a
-    my $x = bits($s, $i, $n-1);	# x = lower order model bits
+    my $px = prob($s, $i, $n-1);	# px = lower order model probability
     if ($ga == 0) { 
 #	    warn "Warning: Zero a-count[$a]\n" 
 #		if $n <= 3 and $a =~ /[^\w ]/;		# check what is going on with punctuation
-	return $x;		# return lower order result
+	return $px;		# return lower order result
     }
-    my $px = exp2(-$x);		# px = lower order model probability
     my $b = $a . " $s->[$i]";	# b = all n words
     my $gb = n0($b);	# gb = count of b
     my $c = $a . " _";	# c = all ngrams that start with a
@@ -647,7 +651,7 @@ sub bits {
     } else {
 	die "Unknown smoothing $config{smoothing}";
     }
-    return ($pb > 0 ? -log2($pb) : $infinity);
+    return $pb;
 }
 
 
