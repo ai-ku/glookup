@@ -1,4 +1,4 @@
-warn q{$Id: submatch.pl,v 1.5 2007/12/01 11:56:23 dyuret Exp dyuret $ }."\n";
+warn q{$Id: submatch.pl,v 1.6 2007/12/01 12:25:33 dyuret Exp dyuret $ }."\n";
 
 # submatch($head, $word, [$pos]): finds the versions of the word that
 # matches the head in terms of capitalization and morphology.
@@ -134,6 +134,7 @@ sub capmatch {
 }
 
 sub mormatch_init {
+    warn "\nInitializing submatch.pl\n";
     %celexpos = ('n' => 1, 'a' => 2, 'v' => 4, 'r' => 7);
     my @lmpos; readCelexFiles('esl', sub { $lmpos[$_[0]] = $_[3]; });
 
