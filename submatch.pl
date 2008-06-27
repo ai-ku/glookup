@@ -1,4 +1,4 @@
-warn q{$Id: submatch.pl,v 1.6 2007/12/01 12:25:33 dyuret Exp dyuret $ }."\n";
+warn q{$Id: submatch.pl,v 1.7 2008/06/24 20:09:18 dyuret Exp dyuret $ }."\n";
 
 # submatch($head, $word, [$pos]): finds the versions of the word that
 # matches the head in terms of capitalization and morphology.
@@ -23,6 +23,7 @@ my @wfstrs;			# wordform strings
 
 sub submatch {
     my ($h0, $w0, $pos) = @_;
+#    warn join(',', 'submatch', @_)."\n";
     my $head = headword($h0, $pos);
     my $word = headword($w0, $pos);
     my @wlst1 = mormatch($head, $word, $pos);
@@ -49,7 +50,7 @@ sub headword {
     my @p = split(/\s+/, $phrase);
     if (@p == 1) {
 	return $phrase;
-    } elsif ($pos eq 'n' and $p[1] ne 'of') {
+    } elsif (defined $pos and $pos eq 'n' and $p[1] ne 'of') {
 	return $p[$#p];
     } else {
 	return $p[0];
