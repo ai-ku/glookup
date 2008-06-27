@@ -1,4 +1,4 @@
-warn q{$Id: submatch.pl,v 1.7 2008/06/24 20:09:18 dyuret Exp dyuret $ }."\n";
+warn q{$Id: submatch.pl,v 1.8 2008/06/27 17:42:17 dyuret Exp dyuret $ }."\n";
 
 # submatch($head, $word, [$pos]): finds the versions of the word that
 # matches the head in terms of capitalization and morphology.
@@ -31,7 +31,7 @@ sub submatch {
     
     for (@wlst1) {
 	my $x = $w0;
-	$x =~ s/$word/$_/;
+	$x =~ s/\Q$word\E/$_/;
 	$_ = $x;
     }
 
