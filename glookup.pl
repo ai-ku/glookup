@@ -115,7 +115,7 @@ sub glookup1 {
 	warn "file=$fname\n" if $debug;
 	my $f = new IO::File $fname
 	    or die "$fname: query=[$query] $!";
-	my $pos = binary_search(0, file_size($f), $query, \&gread, $f);
+	my $pos = binary_search(0, file_size($f), $query0, \&gread, $f);
 	next if not defined $pos; # happens if query after last line
 	$f->seek($pos, SEEK_SET) or die "Cannot seek to $pos";
 	my $cmp;
