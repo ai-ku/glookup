@@ -1,5 +1,5 @@
 /* -*- mode: C; mode: Outline-minor; outline-regexp: "/[*][*]+"; -*- */
-const char *rcsid = "$Id: glookup.c,v 1.10 2008/01/29 06:47:38 dyuret Exp dyuret $";
+const char *rcsid = "$Id: glookup.c,v 1.11 2008/02/11 10:37:19 dyuret Exp dyuret $";
 const char *help = "glookup [-a20] [-p google-ngram-path] < patterns > counts";
 
 #include <stdio.h>
@@ -37,7 +37,7 @@ void get_options(int argc, char *argv[]) {
     case 'a': all_ngrams = 1; break;
     case '2': output_n2 = 1; break;
     case '0': output_zero = 1; break;
-    default: g_message(help); exit(0);
+    default: g_message("%s", help); exit(0);
     }
   }
 }
@@ -51,7 +51,6 @@ typedef GQuark Token;
 static Token ANY;		/* GQuark corresponding to wildcard */
 #define WILDCARD_STR "_"	/* String corresponding to wildcard */
 void wildcard_init() { ANY = g_quark_from_string(WILDCARD_STR); }
-
 
 /** Ngrams and related structures are represented as guint32 arrays
  * where the first element of the array gives the length.  The other
@@ -80,6 +79,15 @@ void ngram_from_string(Ngram ngm, char *str) {
   foreach_token(word, str) {
     g_assert(ntok < NGRAM_ORDER);
     ngm[++ntok] = g_quark_from_string(word);
+  }
+  ngm[0] = ntok;
+}
+
+void ngram_try_string(Ngram ngm, char *str) {
+  int ntok = 0;
+  foreach_token(word, str) {
+    g_assert(ntok < NGRAM_ORDER);
+    ngm[++ntok] = g_quark_try_string(word); /* This will be zero for unknown words */
   }
   ngm[0] = ntok;
 }
@@ -300,7 +308,7 @@ Hash read_patterns() {
   EmptyPattern pat;
   wildcard_init();
   Hash patterns = pattern_hash_init();
-  foreach_line(str, NULL) {
+  foreach_line(str, "") {
     ngram_from_string(pat, str);
     if (!hgot(patterns, pat)) {
       int nwild = ngram_count_wildcards(pat);
@@ -385,7 +393,7 @@ void count_ngrams(Hash patterns, Mask **pattern_masks) {
       g_assert(tab != NULL);
       cnt = atoll(tab+1);
       *tab = 0;
-      ngram_from_string(ngm, str);
+      ngram_try_string(ngm, str);
       if (masks == NULL) {
 	masks = pattern_masks[ngram_size(ngm)];
 	/* If we do not have any masks for this size quit.
@@ -403,14 +411,14 @@ void count_ngrams(Hash patterns, Mask **pattern_masks) {
 
 int main(int argc, char *argv[]) {
   g_message_init();
-  g_message(rcsid);
+  g_message("%s", rcsid);
   get_options(argc, argv);
   g_message("Google ngram path = [%s], all_ngrams = %d", path, all_ngrams);
 
   g_message("Reading patterns from stdin...");
   Hash patterns = read_patterns();
   g_message("Read %d patterns.", hlen(patterns));
-  g_hash_table_analyze(patterns);
+  // g_hash_table_analyze(patterns);
 
   g_message("Creating masks...");
   Mask **masks = mask_table_init(patterns);
@@ -423,7 +431,7 @@ int main(int argc, char *argv[]) {
   pattern_hash_print(patterns);
 
   g_message("Cleaning up...");
-  g_hash_table_analyze(patterns);
+  // g_hash_table_analyze(patterns);
   free_hash(patterns);
   mask_table_free(masks);
 
