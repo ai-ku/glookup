@@ -1,0 +1,9 @@
+glookup.c (c) Deniz Yuret 2007
+
+To compile the program just typing 'make' on a unix computer should
+work.  The glib2 libraries and header files are needed.  Please see
+the user manual for documentation.
+
+glookup.c	source code
+glookup.1	user manual
+glookup.txt	manual in text format

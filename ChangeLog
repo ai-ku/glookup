@@ -1,0 +1,670 @@
+2008-02-14    <dyuret@ku.edu.tr>
+
+	* Can we do something to boost up the perplexity of just content
+	words?  Look into skip models, clustering, parsing, lowercasing
+	etc.
+
+2008-02-03    <dyuret@ku.edu.tr>
+
+	* model.pl (3.25): lower order models are better for some models.
+	This version automates backing off to the best order.
+
+	* still trying to compute cw:
+	+- bugfix counts in diana/010208/foo.cnt,err
+	+- computing with new counts: foo-all.cnt,cw,err
+	+- bugfix counts in wsd-slm/src/foodiff.cnt,err
+	+- checking /work/gngram/*/verify.out4 - done.
+	-- write glookup.pl instead of gngram, integrate binsearch make
+	standalone.
+	+- wsd-slm/src: computing with new counts: foo-all.cnt,cw,err
+	-- rename cxt2pat.pl => evalsubs.pl or worddist.pl wdist.pl
+	+- copying /work/trweb* to /trweb to make space
+	   seems stuck. killed it. done with dyuret and kmuslu.
+	
+2008-02-02    <dyuret@ku.edu.tr>
+
+	* model.pl (3.23): has all the implementations reported in the
+	paper.  In particular we have baseline, cdiscount, kn1, mc, kn3,
+	and kn4 in the order given in the paper.
+
+	* model.pl: experimenting with using a percentage of the
+	denominator instead of the missing count for dirichlet count.
+	foo31, foo32, foo33 running optimization.
+	- Changing kn to use C*nx:
+	7.83278610792357 <= [0.055334171 0.087998784  1.1132683 0.47227584
+	1.8392807 0.84276052  2.2792356  1.0074304] 
+	- Changing kn to use C*nx_:
+	7.88026496734011 <= [0.04779389  0.0941306 0.88297755 0.69046091
+	1.4567796  1.6014173  1.7615987  2.0482427]
+	- Changing kn2 to use C*n1_x_:
+	7.82316150907872 <= [0.033462354   3.192501 0.058393684  3.0842822
+	0.33844714  3.8388633 0.71773931  4.1892131] 
+
+	* model.pl: Baseline models achieve better results using lower
+	order n-grams:
+	- cdiscount (1k optimized results):
+	2-gram: 9.08450692482674 <= 0.948758305
+	3-gram: 8.46934122015906 <= [0.94934424 0.99209517]
+	4-gram: 8.52797373844804 <= [0.94914893 0.99209517 0.99951819]
+	5-gram: 8.67862184222513 <= [0.94914893 0.99209517 0.99951819 0.99995625]
+	- kn (1k optimized results):
+	2-gram: 9.0531360007163 <= 0.9482866075
+	3-gram: 8.36029336536058 <= [0.98520067 0.83452171 0.99420959]
+	4-gram: 8.33130330762054 <= [0.98520067 0.80424828 0.99577209 0.93954335 0.99953513]
+	5-gram: 8.40261215945863 <= [0.98520067  0.8046389 0.99577209 0.91786366 0.99933982 0.98042218 0.99996885]
+
+	- kn1 (1k optimized results):
+	2-gram: 9.05313600106014 <= [0.038962617 0.94825854]
+	3-gram: 8.28540775620964 <= [0.27229852  0.9851726 0.99988011 0.99438207]
+	4-gram: 8.15830220985079 <= [0.095564851  0.9851726 0.99995823 0.99581479 0.99992424 0.99949497]
+	5-gram: 8.19656987210192 <= [0.038962617  0.9851726 0.97914173 0.99581479 0.99992424 0.99931418 0.99985808 0.99996568]
+	
+2008-02-01    <dyuret@ku.edu.tr>
+
+	* model.pl: 
+	- version 3.22 uses D=1 and C * n1modx_ in kn2:
+	7.80310938385236 <= [ 1.4369137  1.3023956  2.0387025  2.4608132  3.1924666  2.9146141  3.4571246  3.9006402]
+	- experimenting with D=0 in kn2: foo22
+	7.8093857188333 <= [ 3.5378598   3.192501  3.0752446  2.8224962  4.4838955  3.2652199   5.410972  3.6069656]
+	- exp with backoff based on nx-nx_ in kn2 (D=0): foo23
+	7.81034498858537 [0.11966381   3.192501 0.15670076  2.8094593 0.20582305   3.237459 0.23886949  3.5852088]
+	- exp with nx-nx_ with D=1: foo26.out,err
+	7.80377791076084 <= [0.059170783  3.1925007 0.058437701  2.9088102 0.082038069  3.4459117 0.094556554  3.9088292]
+	
+	Experimenting with n1 instead of n1mod:
+	- exp with n1 instead of n1mod but mc with c * n1x_: foo24
+	8.0039932417994 <= [1   3.192501  1.0259968  3.1852197  1.9232529   3.767363  3.7535665  3.7504244]
+	- exp with n1 instead of n1mod but mc with c * (nx-nx_): foo25
+	8.00389842209989 <= [1   3.192501 0.021067667  3.1484391 0.031134446  3.6573698 0.053723129  3.7206964]
+
+2008-01-31    <dyuret@ku.edu.tr>
+
+	* TODO: run validate on old kn.
+
+	* TODO: try srilm backoff.
+
+	* TODO: create arpa format files from text or google.
+
+2008-01-30    <dyuret@ku.edu.tr>
+
+	* unkpat.pl: Optimizing on mincnt: does not look like we get more
+	than a quarter cent.
+	0	7.8025
+	200	7.8025
+	500	7.8016
+	1000	7.8006
+	1500	7.8006
+	2000	7.8003
+	2500	7.8000
+	2800	7.8001
+	3000	7.8018
+	4000	7.8024
+	5000	7.8012
+	10000	7.8073
+	
+	* model.pl (3.21): Get rid of kn.pl, make model.pl includable.
+	
+	* model.pl (3.22): Got rid of the D discount coefficient for kn.
+	Used to give us less than 0.1 cent.  New values:
+	7.80310938385546 on 1k, 7.85546292193106 on brown.gtok.nounk
+	+- reoptimizing on new data file foo.1k.cnt,err
+	+- running optimize on foo.1kopt.out,err
+	+- trying on brown foo.1kopt.brown.err
+	+- 7.8552 was the result even though some parameters changed
+	significantly.  The function is pretty flat.
+	
+	* model.pl: try switching between mc and kn at different stages.
+	In the table below, k uses unmodified counts (kn), x uses modified
+	counts (kn2).  Each entry has been reoptimized.  It seems using mc
+	for first level and knmod on the rest always gives the best
+	results.
+
+	5 4 3 2 1
+	k x x x x	7.8025
+	k k x x x	7.8269
+	k k k x x	7.8934
+	k k k k x	7.9721
+	k k k k k	7.9995
+	  k x x x	7.8695
+	  k k x x	7.9333
+	  k k k x	8.0121
+	  k k k k	8.0394
+	  x x x x	8.1036
+	    k x x	8.1526
+	    k k x	8.2257
+	    k k k	8.2531
+	    x x x	8.4825
+	      k x	9.0309
+	      k k	9.0569
+	      x x	9.7060
+	        k	11.7198
+	        x	12.6157
+	
+2008-01-29    <dyuret@ku.edu.tr>
+
+	* glookup.c (1.10): Added a -0 option to print out zero count
+	patterns.
+
+	* glookup.c (1.11): Reversed the meaning of the -2 option, so use
+	-2 when you want to output n2 counts.
+	
+ 	* model.pl (3.19): I should validate a couple of ngrams to be sure
+	probabilities add to 1.  I added a -string option to model.pl to
+	test the last word of a given string.  I wrote verifypat.pl that
+	will read the patterns for that word and replace each occurance
+	with the 13M other words.  I added a -verify option to model.pl
+	that works like the -string option but prints out the
+	probabilities of all 13M words.  Result: the largest deviation
+	from 1 for knmod is 1e-4.  7.8025 bits is for real.
+	
+	* TODO: Need to find a quick way to get pattern counts.  Sorting
+	gngram files in /work/gngram/sort2.sh by the second word.  Must
+	merge and index when done.  Using the first and second word sorted
+	files, we should be able to count things quickly.
+	
+	+- /work/gngram/*/*.sort2 files are getting ready.
+	+- next step: merge the files and resplit them.
+	+- Trying (in 2gms) sort -k2,2 -merge *.sort2 | split -l 10000000 
+	+- Check out merge.sh,out,err in the other directories.
+	+- split cannot generate more than 100 numeric suffixes! 
+	+- rerunning final merge
+	+- get rid of dvd7 split to 10M lines: merge3.out,err
+	+- run verify on 4 and 5: sort disorders
+	+- next step: update gngram to take advantage.  do not use idx files.
+	+- rerun verify on 4 and 5: verify.out3 is the output
+	+- rerun merge.sh, output in merge.out2,err2
+	+- no space left on device, removing files, then rerun merge2.sh.
+	+- new merge done, verifying sort in verify.out4,err4
+	
+	* genpat.pl (1.1): try the unknown tag for infrequent words in
+	context.  Wrote genpat.pl to generate patterns with unknowns.
+	Used glookup to generate counts.  Files are brown.gtok.1k.unk*.
+	Initial experiment replacing every word with less than 1000 count
+	with <UNK> tag in the context gives 7.8006.
+	
+	* model.pl (3.20): Added the mincnt option for treating words
+	under mincnt as <UNK> when in context.  It would be nice to do
+	optimization on mincnt, but every time we change mincnt we need to
+	do a pattern lookup again.  This will have to wait until we have
+	gngram working with wildcards.  
+	
+	* unkpat.pl (1.1): Or we'll replace every combination of words
+	with <UNK>.
+	
+	* TODO: recompute cw matrix for senseval2.  I am updating kn.pl.
+	I realized model.pl has backoff if nx==0.  I am checking backoff
+	if nx_==0. - foo9.out,err.  Maybe should rewrite in terms of nx
+	if that doesn't work.
+	New cw matrix is under preparation 
+	+- /home/dyuret/wsd-slm/cluster/080108a/foo.out,err
+	+- broke: 
+	[of] some patterns not found, using zero
+	Can't take log of -0.0214976 at ./semcor2pdist.pl line 155.
+	+- rerunning to get all missing patterns.
+	+- next step: lookup missing patterns and add to
+	noun_patterns.cnt.all.
+	+- still buggy - error exit.
+	+- trying to find missing patterns in *cw* using foo.pl foo2.pl
+	+- missing counts in glookup.out/err using glookup.pl
+	+- patched noun_patterns.cnt.all, rerun semcor2pdist. foo.out,err
+	+- more missing ngrams - error exit.
+	+- started glookup to foo2.cnt,err; will have to start over if
+	this doesn't work.
+	+- started make cw, running in foo.out,err
+	+- I give up.  New version running in 
+	/home/dyuret/wsd-slm/src/senseval2n.pat
+	+- running glookup at the same time:
+	+- nohup make senseval2n.cnt >foomake.out 2>foomake.err &
+	+- approx eta 9pm
+	+- running make senseval2n.cw >make.out 2> make.err
+	+- exited with error:
+	d00.s03.t03
+	nxy=0 kn0=0 mc=159 nx_=0 nx=159 kn=0 at model.pl line 757, <> line 9.
+	
+	* TODO: WRITE THE PAPER.
+
+	* TODO: Look at diana's data.  Seems like we need the same stuff
+	we need for cw.
+	
+
+2008-01-28    <dyuret@ku.edu.tr>
+
+ 	* TODO: try ndiscount, good-turing; both backoff models.
+	wbdiscount already similar but can be implemented - interpolated
+	by default.  then write short paper introducing the missing-count
+	method.
+
+	* TODO: missing count can be applied to other discount methods.
+	wbdiscount and kndiscount could use missing count instead of
+	one-count.
+
+	* TODO: confirm results of model.pl 3.6 and 3.7 by using kn.pl on
+	brown.no-unknown.raw.
+	(1) kn.pl excluding </S> scoring on no-unknown: 8.4881
+	(2) kn.pl srilm backoff to modified counts: 8.5960
+	(3) kn.pl directly use modified counts order 4: 8.5481
+	The remaining difference is due to using no mc and using gtok
+	instead of raw.  So no mistakes here.
+	
+	* brown.gtok.nounk: Start using brown.gtok for testing.  First we
+	need to find the no-unknown subset of brown.gtok:
+	brown.gtok.nounk.  brown.raw.gz and brown.gtok have 52108
+	sentences brown.no-unknown.raw has 51210 sentences
+	brown.gtok.nounk has 51339 sentences Difference between the last
+	two is due to different tokenization.
+
+	* brown.gtok.1k: Next reoptimize based on a 1k sample of
+	brown.gtok.nounk: brown.gtok.1k.
+
+	* brown.gtok.1k.cnt: The subset of counts for brown.gtok.1k.
+	
+	* model.pl (3.10): Performed optimization on brown.gtok.1k for
+	each smoothing method starting from (1) old optimum (2) zeroes (3)
+	random.  (kn includes mc=nx-nx_ and kn0 includes n2_x_ fix) 
+	Results (1000 sentences, 22606 words):
+
+	baseline-old	8.16175731002602 <= [0.12264181 0.48531058 0.73285371  0.8485226]
+	baseline-zero	8.16175731319685 <= [0.12265625 0.48525391  0.7328061 0.84863281]
+	baseline-random	8.16175731496028 <= [0.12267517 0.48527046 0.73289856 0.84851047]
+	linear-old	7.99933067284673 <= [ 6.8428534 0  5.6275321  1.6448876  5.8666798  2.2885119  6.2342418   2.226181]
+	linear-zero	7.99933067284723 <= [ 6.8428393 0  5.6275471   1.644931  5.8666063  2.2883801  6.2342963  2.2262685]
+	linear-random	7.99933200255708 <= [ 6.8432846 -0.077940532  5.6308825 -2.2028024  5.8661872  2.2889908  6.2342222  2.2262391]
+	product-old	7.99946312536937 <= [ 6.8440119  5.6305746  5.9277921  6.3675802]
+	product-zero	7.99946312537063 <= [ 6.8439194  5.6305614  5.9277118  6.3676653]
+	product-random	7.99946312536625 <= [ 6.8439982  5.6305187  5.9277929  6.3675556]
+	kn-old		8.19091277951892 <= [0.83456664 0.80501932 0.81691654 0.90655321 0.97261754 0.96917268 0.97422316]
+	kn-zero		8.19091278228181 <= [0.83451504   0.805046 0.81689559 0.90663266 0.97265126 0.96922358 0.97421549]
+	kn-random	8.19091278120374 <= [0.83446698 0.80506644 0.81689801 0.90653642 0.97272077 0.96917702 0.97411712]
+	cdiscount-old	8.23573621678017 <= [0.58301752 0.79111861 0.92800359  0.9840277]
+	
+	Optimization seems pretty stable, all three starting points lead
+	to the same minimum.  Using these optimized coefficients the
+	entropy for brown.gtok.nounk: (51339 sentences, 1162052 words)
+
+	baseline	8.20830869973577
+	linear		8.047520370201
+	product		8.0477965326711
+	kn		8.23974660099736
+	cdiscount	8.29123416264869
+	
+	* model.pl (3.11): remove the linear smoothing option.  redefine
+	the product formula more simply.  Rename product => mc for missing
+	count.  
+
+	* model.pl (3.12): tried to adapt kn with missing count.  Did not
+	work.  Entropy around 8.9.
+
+	* model.pl (3.13): wbdiscount adapted to missing_count gave
+	8.5773.  i.e. (1-a)*(n0(a_z)/n0(a_)) + a*p_backoff where a =
+	probability of encountering an unseen word =
+	(n0(a_)-n0(a_*))/n0(a_).  The best results (7.9996) are achieved
+	if we take a=7*mc/(n0(a_)+7*mc) which is equivalent to the missing
+	count.
+	
+	* model.pl (3.14): Correcting the n1 counts works well for kn.  I
+	did it for the backoff kn2().  The optimization on 1k gives 7.9600
+	and the final score on brown.gtok.unk is 8.01646443686864.  All
+	coefficients are very close to their limits.  Probably means a bug
+	or there is possible improvement.
+
+	* model.pl (3.15): Using mc discounting with kn gives better
+	results (7.9126 on 1k).  Modified kn to use mc discounting on
+	first call.  Final score with knmod is 7.96538464255271 on
+	brown.gtok.unk.  Tried srilm (discount to modified counts if
+	context = 0), approx same result.  Tried always using mod counts,
+	got worse.  Further optimization of parameters gives 7.9088 on 1k
+	and 7.96264623252661 on full.
+
+	* model.pl (3.16): Further discounting on the backoff kn improved
+	the 1k result to 7.8232.  Backoff discounting based on multiple of
+	n1_x_.
+
+	* model.pl (3.17): Basing backoff kn discounting on n1modx_
+	improved the 1k result to 7.8031.  Result on brown.gtok.nounk is
+	7.85546296227405. I tried other options (n1x_, n1_x, n1mod_x,
+	n1_x_) which did worse.
+
+	n1_x_	7.8232
+	n1x_	7.8072
+	n1modx_	7.8031
+	n1_x	7.8162
+	n1mod_x	7.8149
+	
+	I also tried basing the kn discounting on nx_ and n1x_ instead of
+	mc, both did worse.
+
+	mc	7.8232 (nx-nx_)
+	nx_	7.9032
+	n1x_	7.8341
+	
+	I tried optimization with random starts three times, they all
+	converge to the same optimum.  Note that the subtraction constants
+	D are still always 1.
+
+	* model.pl (3.18): Backoff kn2 did best using both absolute
+	discounting and mc discounting.  I am trying the same thing on kn.
+	1k=7.80248865053247 full=7.85466149603376
+	
+2008-01-26    <dyuret@ku.edu.tr>
+
+	* TODO (once we replicate old result): Need to implement parameter
+	optimization in kn.pl.  Rename to kntest.pl and start versioning.
+	
+	* kntest.pl (1.1): Replicating the gngram implementation.
+	Result on brown.raw:
+          'entropy' => '7.85429704966835',
+          'bits' => '9357656.63075717',
+          'words' => 1191406,
+          'sentences' => 52108
+	Result on brown.gtok:
+          'entropy' => '7.83440997322489',
+          'bits' => '9293670.67806768',
+          'words' => 1186263,
+          'sentences' => 52108
+	
+	* kntest.pl (1.2): Fix the bug, switch to n2_x_, instead of using
+	the incorrect n1x_ in kn_backoff.  n2_x_ < n1x_, because if _xy >
+	40 then xy > 40.  p = p0 + D * (n2_x_ / n1_x_) * p_backoff.  So we
+	were actually subtracting D n2_x_ times, but pretending that we
+	subtracted n1x_ times thus multiplying p_backoff with too large a
+	factor.  In effect getting probabilities > 1.  When we fix this
+	true entropy will go up and parameters will have to be
+	reoptimized.  
+	Result on brown.raw:
+          'entropy' => '8.30275908502442',
+          'bits' => '9891956.9904526',
+          'words' => 1191406,
+          'sentences' => 52108
+	Result on brown.gtok:
+          'entropy' => '8.28466521845003',
+          'bits' => '9827791.81603418',
+          'words' => 1186263,
+          'sentences' => 52108
+	I had reported 8.06 bits per token using one-count smoothing, this
+	looks much worse.  
+	
+	* kntest.pl (1.3): Reoptimize the parameters.  Added the dhc code
+	and kn_optimize function. I used the first 1000 sentences in
+	brown.raw for optimization.  
+	
+	Before optimization:
+	D40=[,,28.1109692864426,33.987335626663,39.1694842774431,39.8117263331]
+	D1=[,,0.859485503851185,0.960345276045012,0.995659303866489,]
+	'entropy' => '8.25288917451931',
+	'bits' => '219675.404047355',
+	'words' => 26618,
+	'sentences' => 1000
+	
+	After optimization:
+	D40=[,,23.452426233636,31.7453176076428,36.8621352453415,34.7597499965965]
+	D1=[,,0.778256744063045,0.893536910086025,0.97095254721513,]
+          'entropy' => '8.24244847648835',
+          'bits' => '219397.493547167',
+          'words' => 26618,
+          'sentences' => 1000
+
+	We can try to (1) further optimize using brown.raw.gz, (2) try the
+	simplex algorithm for optimization, (3) try the kn formula instead
+	of optimizing.
+	
+	(1) further optimization on brown.raw.gz:
+	Before:
+	D40=[,,23.452426233636,31.7453176076428,36.8621352453415,34.7597499965965]
+	D1=[,,0.778256744063045,0.893536910086025,0.97095254721513,]
+	Entropy=8.29894874440009
+	After (incomplete run):
+	D40=[,,30.0267042698266,34.0348554882479,38.903553180532,39.2311709647211]
+	D1=[,,0.806059627882179,0.905712916279442,0.969815522701244,]
+	Entropy=8.29739709235189
+
+	It doesn't look like a significant improvement is possible.
+	
+	* kntest.pl (1.4):
+	
+	(2) try the simplex algorithm on brown.raw.1k:
+	Before: (I don't know why it does not use the already optimal
+	starting point)
+	D40=[,,23.452426233636,31.7453176076428,36.8621352453415,34.7597499965965]
+	D1=[,,0.778256744063045,0.893536910086025,0.985238261500844,]
+	Entropy=8.2428166156793
+	After:
+	D40=[,,23.4507000891909,31.7489443511047,36.8589688573506,34.7620241990907]
+	D1=[,,0.778168322536438,0.893583778614561,0.970916338359127,]
+	Entropy=8.24244847179651
+	Converged on the same point.
+	
+	(2a) try it starting from .5
+	Before:
+	D40=[,,20,20,20,20]
+	D1=[,,0.5,0.5,0.514285714285714,]
+	Entropy=8.42563712346423
+	After:
+	D40=[,,9.52611645335756e-09,25.206306285916,35.9423081077305,35.0919699626813]
+	D1=[,,0.785256261214611,0.896094892314138,0.96783150804313,]
+	Entropy=8.24351625884517
+	Slightly worse than (2).
+	
+	(2b) try it starting from 1
+	Before:
+	D40=[,,40,38,37.3333333333333,37]
+	D1=[,,0.92,0.916666666666667,0.914285714285714,]
+	Entropy=8.2507824734898
+	After:
+	D40=[,,40,31.7488792672613,36.8589701767889,34.7619640157182]
+	D1=[,,0.778162993996729,0.893580209850111,0.970916062471905,]
+	Entropy=8.24278104440984
+	Slightly worse than (2).
+
+	It seems simplex has nothing new to offer.
+	
+	(3) try the kn formula: D=n1/(n1+2*n2) where n1 and n2 are the
+	total number of ngrams with exactly one and two (possibly
+	modified) counts respectively.  Modified kn uses 3 different
+	constants for each ngram order:
+                   Y   = n1/(n1+2*n2)
+                   D1  = 1 - 2Y(n2/n1)
+                   D2  = 2 - 3Y(n3/n2)
+                   D3+ = 3 - 4Y(n4/n3)
+	For modified counts the probability is proportional to n1(_xy), so
+	we'll need to find the number of ngrams with 1,2,3,4 counts
+	exactly.  With regular counts there is the issue of 40 minimum.
+	We can extrapolate but I am not sure if the same formulas still
+	make sense.  We'll need some very big hashes.
+
+                       n0              n1              n2
+        _              1024908267229   13588391        -
+        _ _            910884463583    314843401       12880878
+        _ _ _          739006848674    977069902       9329099
+        _ _ _ _        528435661704    1333820466      7934066
+        _ _ _ _ _      368402367169    1214460675      7015505
+	
+	+- check n1countX.out and n1countX.err for X=2,3,4,5
+	+- 2 and 3 are complete.  4 and 5 run out of memory.  need to
+	implement smarter algorithm.  However if we trust the dhc results
+	this is unlikely to give us better constants.
+	
+	(4) According to my old notes, 8.06 with one-count is achieved
+	skipping sentences with unknown words.  So the result is out of
+	51210 sentences with no unknowns (brown.no-unknown.raw) instead of
+	the full 52108 in brown.raw.  If we run on this data we get:
+          'entropy' => '8.25369098267915',
+          'bits' => '9591639.05204439',
+          'words' => 1162103,
+          'sentences' => 51210
+	More and more it seems there is something seriously wrong with
+	kn.  We should first confirm 8.06 is for real, then try to fix kn
+	with the ideas below.  So I will switch to model.pl which includes
+	optimization as well as other discounting methods.
+	
+	* model.pl (3.3): Adapted to the new count file with n0, n1, n2.
+	KN performance with n1x_ on no-unknown brown was 7.81, after
+	fixing with n2_x_ it is now 8.26, consistent with kntest.pl.
+
+	* model.pl (3.4): Get rid of mc2, switch to n0x_.  This 8.4585
+	with existing parameters.  Reoptimize the parameters.  Best gives:
+	8.44373232784493 <= [ 3.2286943  1.2179301  5.6215879  2.2047427  9.4821263  3.6767551  5.7211678]
+	Running with brown.no-unknown gives: 8.4744.
+	
+	* This should be running experiment 1 in 2008-01-10 with optimized
+	parameters.  Far from the 8.16 I found earlier.  Trying the same
+	change with kntest.pl on brown.gtok gives 8.5176.  Must replicate
+	2008-01-10 result.  The difference is 01-10 result counts bits for
+	</S> in the entropy average.  That explains the whole difference,
+	without </S> scoring kn.pl (1.5) gives 8.5176 as well.
+	
+	* This is interesting.  The n1x_ to n2_x_ change is a bug fix, we
+	cannot do anything about that.  But I thought the n0x to n0x_
+	change would be rather harmless.  In both cases the probabilities
+	of words are proportional to n0xy.  In the old case we have:
+
+	(n0xy-D)/n0x + kn_backoff * ((n1x_ * D) + (n0x - n0x_))/n0x
+
+	In the new case we have:
+
+	(n0xy-D)/n0x_ + kn_backoff * (n1x_ * D)/n0x_
+	
+	We can also rewrite the old case with mc = n0x - n0x_:
+
+	(n0xy-D)/(n0x_+mc) + kn_backoff * ((n1x_ * D) + mc) / (n0x_+mc)
+	
+	By playing with the D values, it seems we should be able to give
+	an equal amount of probability to unseen words.  But that's not
+	happening, so it seems we need to keep mc2.
+	
+	Maybe something is messed up with the old version like the n1x_
+	error.  Unfortunately it is not easy to implement probability
+	checksums for debugging.  To compute the probabilities of all 13M
+	words in a given context would require full search of ngram data,
+	not just a cache file.
+	
+	* model.pl (3.5): Go back to using n0x and mc.  Reoptimize the
+	parameters on brown.raw.1k.  Performance on brown.no-unknown goes
+	from 8.25785 to 8.25373.  Worse than the baseline.
+	
+	* model.pl (3.6): Always backoff to modified counts like srilm.
+	Until now if the context is unseen we backoff to unmodified
+	counts.  I also changed the numeric representation of the KN
+	coefficients, used to be D=1/(1+exp(-KN[i])), now just D=KN[i]
+	(multiplied by 40 for regular counts).  After reoptimization
+	performance on brown.no-unknown is 8.3156.
+
+	* model.pl (3.7): Always use the backoff model, do not use regular
+	counts.  After parameter reoptimization 8.35819204086292.
+	
+	* model.pl (3.8): Back to version 3.5.
+	
+	* TODO: Experiments 3.6 and 3.7 seem to differ from the 01-10
+	results.  The parameter reoptimization does not change the results
+	too much.  Scoring </S> seems to be a significant difference.  Try
+	to replicate the same results using kn.pl.
+	
+	* TODO: Work on optimizing kn a bit.  But if it looks hopeless we
+	need to look at other smoothing methods.  Review the ones in
+	ngram-discount.7 man page.
+	
+	Add a debug option where we manually compute and add the
+	probabilities of all 13M words for each instance.
+	
+	Turn on scoring </S>.  Think about the handling of unknown
+	words.  When they are target maybe we should just give 0 like
+	srilm.  Reoptimize parameters for that.  When they are in the
+	context replace them with <unk>.  Review the handling of [;:?.].
+	
+	Switch to brown.gtok.  Reoptimize parameters.
+	
+	Try experiment 2 in 2008-01-10, reoptimize the parameters.
+
+	Try experiment 3 in 2008-01-10, reoptimize the parameters.
+
+	* Seems our hope with kn was misplaced.  The non-buggy version
+	seems hopelessly bad.  Should change glookup, make -2 off by
+	default and find another smoothing algorithm.
+
+	* model.pl (3.9): Implemented srilm's cdiscount.  Worse than the
+	baseline.  (8.30 on brown.no-unknown).
+
+	* TODO: try ndiscount, good-turing; both backoff models.
+	wbdiscount already similar but can be implemented - interpolated
+	by default.  then write short paper introducing the missing-count
+	method.
+	
+2008-01-25    <dyuret@ku.edu.tr>
+
+	* kn.pl: To find out the cause of the difference I ran kn.pl on
+	the original brown.raw.gz data.  I got 8.2377.  Definitely due to
+	some change in the algorithm.  Differences with gngram:
+	- gngram uses n0x for denominator, kn uses n0x_
+	- small difference in handling [;!?.]
+	- missing cnt calculation does not have mc2 in kn.
+	- gngram backoff uses n1x_ instead of n2_x_.
+
+	We also had the experimental features turned on in kn.pl for #2
+	and #3 in 2008-01-10.  I commented those out.  I got 8.1182.
+
+	Tried using n0x like gngram instead of n0x_.  Had to add mc2.  I
+	got 8.1033.
+
+	Also tried n1x_ like gngram instead of n2_x_ (this is actually
+	reintroducing a bug, probabilities do not add up to 1 any more).
+	I got 7.6452.
+
+	This shows one more difference.  kn scores the </S> token, gngram
+	does not.  But also there are marked differences in the other bits
+	reported.  Must investigate more...
+	
+	In the meantime kn.pl was modified to accept any count not present
+	in the count file as zero.  This is for compatibility with the new
+	glookup (changed for efficiency).  I compared the counts of the
+	new glookup and the old one and they are identical on all nonzero
+	entries.
+	
+	OK, there is no <S> pattern in the count file.  That is because we
+	constructed the count file with the old settings in effect.  And
+	we turned off the check for missing patterns (assumed zero).  We
+	need to run glookup again to take into account n0x and n1x_
+	patterns.
+	
+	I am adding an option to glookup (-0) that will turn back on
+	printing of zero count patterns.  That coupled with appropriate
+	changes in kn.pl (make it an option to warn for patterns not
+	found) should catch errors of the type in the previous paragraph.
+
+	When I also turned off the scoring of </S> tokens I got:
+
+          'entropy' => '7.85429704966835',
+          'bits' => '9357656.63075717',
+          'words' => 1191406,
+          'sentences' => 52108
+
+	The gngram results were:
+          'entropy' => '7.85430272395167',
+          'nbits' => '9357663.39113237',
+          'nword' => 1191406,
+          'nsent' => 52108
+	
+	This seems close enough.
+	
+	
+2008-01-14    <dyuret@ku.edu.tr>
+
+	* kn.pl: Why do the patterns that come from the main::kn_patterns
+	hash have repetitions?
+
+2008-01-10    <dyuret@ku.edu.tr>
+
+	* kn.pl: Did some experiments.
+	1. version 1.5 did 8.1604.  this is different than my last result
+	with gngram 7.8543.  Unfortunately I changed the data file a bit.
+	Also there are some changes in the probability calculation.
+	2. I used to backoff to the model with unmodified counts if the
+	context had zero count.  SRILM always backs off to the modified
+	counts.  I tried that.  Got 8.1681 - not a significant
+	difference.
+	3. Completely remove the unmodified counts.  Directly use modified
+	counts with order=4.  This gave the best result: 8.1233.  Of
+	course coefficients aren't optimized for this.
+
+	Should explore the differences with the latest results first.
+	Maybe start by using the same data.  Then look into parameter
+	optimization.  Try the srilm formula.
+
