@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: model.pl,v 3.26 2008/02/05 13:43:17 dyuret Exp dyuret $ } ."\n";
+warn q{$Id: model.pl,v 3.27 2008/02/24 17:02:42 dyuret Exp $ } ."\n";
 
 use strict;
 use Getopt::Long;

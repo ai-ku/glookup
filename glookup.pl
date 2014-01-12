@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-# $Id$
+# $Id: glookup.pl,v 1.4 2009/03/19 10:33:58 dyuret Exp $
 use strict;
 use Getopt::Long;
 use Data::Dumper;

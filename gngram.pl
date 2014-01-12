@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-warn q{$Id: gngram.pl,v 1.24 2007/05/26 13:58:35 dyuret Exp dyuret $ } . "\n";
+warn q{$Id: gngram.pl,v 1.25 2007/11/28 14:37:53 dyuret Exp $ } . "\n";
 
 # Set of procedures to access the plain text version of the google
 # ngram data.

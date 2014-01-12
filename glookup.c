@@ -1,5 +1,5 @@
 /* -*- mode: C; mode: Outline-minor; outline-regexp: "/[*][*]+"; -*- */
-const char *rcsid = "$Id: glookup.c,v 1.11 2008/02/11 10:37:19 dyuret Exp dyuret $";
+const char *rcsid = "$Id: glookup.c,v 1.12 2013/12/05 15:50:50 dyuret Exp $";
 const char *help = "glookup [-a20] [-p google-ngram-path] < patterns > counts";
 
 #include <stdio.h>

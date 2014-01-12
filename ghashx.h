@@ -1,4 +1,4 @@
-/* $Id: ghashx.h,v 1.3 2009/05/05 09:47:19 dyuret Exp $ */
+/* $Id: ghashx.h,v 1.1 2014/01/12 15:32:10 dyuret Exp $ */
 
 #ifndef __GHASHX_H__
 #define __GHASHX_H__

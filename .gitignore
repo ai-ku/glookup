@@ -1,0 +1,8 @@
+RCS/
+deprecated/
+glookup
+glookup.txt
+glookup-1.*/
+*.o
+release/
+unused/
