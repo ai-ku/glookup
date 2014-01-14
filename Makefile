@@ -3,7 +3,7 @@ CC=gcc
 CFLAGS=-O3 -D_GNU_SOURCE -std=gnu99 -pedantic -Wall -save-temps
 LIBS=
 
-all: glookup README
+all: glookup glookup.txt model.txt
 
 glookup: glookup.o dlib.o
 	$(CC) $(CFLAGS) $^ $(LIBS) -o $@
@@ -14,8 +14,11 @@ glookup.o: glookup.c dlib.h
 dlib.o: dlib.c dlib.h
 	$(CC) -c $(CFLAGS) $< -o $@
 
-README: glookup.1
-	groff -t -e -mandoc -Tascii $^ | col -bx > $@
+glookup.txt: glookup.1
+	groff -t -e -mandoc -Tascii $< | col -bx > $@
+
+model.txt: model.pl
+	perldoc $< > $@
 
 release: Makefile README glookup.c glookup.1 dlib.c dlib.h
 	-rm -rf glookup-${VERSION}

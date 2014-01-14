@@ -1,0 +1,38 @@
+NAME
+    model.pl - Optimize and test language models
+
+SYNOPSIS
+    model.pl [options] [file ...]
+
+    Typical usage:
+
+      model.pl -patterns < text > patterns
+      glookup < patterns > counts
+      model.pl -counts counts < text
+
+    This program will read the given input file(s) and compute cross entropy
+    for a language model specified by -smoothing and the counts given in the
+    -counts file. The -optimize and related options perform parameter
+    optimization for the given -smoothing option. The -patterns option
+    outputs the patterns that the -counts file will need to contain in order
+    to compute cross entropy.
+
+    The valid smoothing options are: baseline, kn, knmod, mc, cdiscount,
+    wbdiscount. Default is knmod, which gives 7.85 bits per word on the
+    brown corpus.
+
+OPTIONS
+   -counts file		read counts from file
+   -debug		detailed debug output
+   -dhc			use DHC for optimization
+   -mincnt n		use <UNK> for words in context with count < n
+   -ngram n		use ngram order n, default=5
+   -optimize		perform parameter optimization
+   -patterns		output ngram patterns
+   -random		start optimization at random point
+   -simplex		use Simplex for optimization
+   -smoothing str	use smoothing method "str", default=knmod
+   -string str		model last word of "str"
+   -verbose		output bits for each word and each ngram order
+   -verify str		verify probability=1 for last position of "str"		
+   -zeroes		start optimization at zero
