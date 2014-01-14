@@ -1,148 +1,24 @@
-glookup(1)                                                          glookup(1)
+GLOOKUP  	            Copyright (c) 2008-2014, Deniz Yuret
 
+This is the code used in:
 
+Deniz Yuret. 2008. Smoothing a Tera-word Language Model. In the 46th
+Annual Meeting of the Association for Computational Linguistics: Human
+Language Technologies.  See http://goo.gl/rmD87d for details.
 
-NAME
-       glookup  -  reads  ngram  patterns with wildcards from stdin and prints
-       their counts from the Web1T Google ngram data.
+The glookup program reads ngram patterns with wildcards (represented
+with the '_' character) from stdin and prints their counts from the
+Web1T Google ngram data (whose path is given by the -p option).
+Please see glookup.1 (man page), or glookup.txt (plain text format)
+for documentation.
 
+The model.pl script optimizes and tests various language models.  See
+'perldoc model.pl', or model.txt for documentation.  Typical usage:
 
-SYNOPSIS
-       glookup [-p google-ngram-path] [-a] [-2] [-0] < patterns > counts
+      model.pl -patterns < text > patterns
+      glookup -p web1t_path < patterns > counts
+      model.pl -counts counts < text
 
-
-DESCRIPTION
-       glookup reads  ngram  patterns  (possibly  containing  wildcards)  from
-       stdin,  finds  their  counts  in  one  pass from google ngram data, and
-       prints the results to stdout.
-
-       The input should have a single pattern on each line consisting of space
-       separated  tokens with '_' representing the wildcard token that matches
-       any word.  The output will have up to three counts (tab separated) next
-       to  each  pattern.   Patterns  with  zero  counts will not be output by
-       default.
-
-        n0: the total count of the ngrams matching a given pattern.
-
-        n1: the number of distinct ngrams matching a given pattern.   This  is
-       only output for patterns with wildcards.
-
-        n2:  the  number  of  distinct words that appear as the last word in a
-       pattern.  This is output for patterns that have more than one  wildcard
-       and  end with a wildcard.  The n2 output is optional and was used in an
-       older version of Kneser-Ney smoothing.
-
-       For reference, here are the counts for the all-wildcard  patterns.   If
-       your counts differ you may not have the latest patch from Google.
-
-                       n0              n1              n2
-        _              1024908267229   13588391        -
-        _ _            910884463583    314843401       12880878
-        _ _ _          739006848674    977069902       9329099
-        _ _ _ _        528435661704    1333820466      7934066
-        _ _ _ _ _      368402367169    1214460675      7015505
-
-
-       Kneser-Ney Discounting Primer
-
-       KN  discounting  generally  gives superior results and glookup has been
-       written to extract all the counts necessary.  Here is a brief  overview
-       of interpolated KN discounting as described in Chen and Goodman 1998.
-
-       Let  abc  represent an ngram, and p(abc) the conditional probability of
-       the last word (c) given the first n-1 words (ab).  We will use n0,  n1,
-       n2 to represent the counts defined above and '_' to represent the wild-
-       card.
-
-       The general form of an interpolated language model is
-
-         p(abc) = f(abc) + bow(ab) p(bc)
-
-       Typically f(abc) is discounted to be less than the  maximum  likelihood
-       estimate  n0(abc)/n0(ab_)  so  that there is some probability mass left
-       over for words never seen in the context (ab_).   In  Kneser-Ney,  dis-
-       counting  is  accomplished  by  subtracting  a  constant from the ngram
-       count:
-
-         f(abc) = max(0, n0(abc)-D(abc)) / n0(ab_)
-
-       The discounting constant D(abc) depends only on the order of the  ngram
-       abc in the original KN algorithm.  (In Chen and Goodman's modified ver-
-       sion they compute different D constants for one-count,  two-count,  and
-       three-plus  count  ngrams  for each order.)  A good value for D(abc) is
-       N1/(N1+2*N2) where N1 and N2 represent the number of  ngrams  in  abc's
-       order that occur once and twice in the training data.
-
-       A  backoff  weight, bow(abc), is calculated to make sure the probabili-
-       ties of all the words in the context (abc) add up to 1.   This  can  be
-       shown to be
-
-         bow(ab) = D(abc) n1(ab_) / n0(ab_)
-
-       The  main  idea  of  Kneser-Ney is to use a different estimator for the
-       lower order ngrams.  Specifically, the probability  of  a  lower  order
-       ngram  used  for  backoff,  p(bc), is assumed to be proportional to the
-       number of unique words preceding it, n1(_bc):
-
-         p(bc)  = f(bc) + bow(b) p(c)
-         f(bc)  = max(0, n1(_bc)-D(bc)) / n1(_b_)
-         bow(b) = D(bc) n2(_b_) / n1(_b_)
-
-       The probability of a unigram can be interpolated with a  zero'th  order
-       model  (1/|Vocab|),  or directly taken to be proportional to the number
-       of words preceding it:
-
-         p(c) = n1(_c) / n1(_ _)
-
-       There are a couple of complications that stem from  the  incompleteness
-       of  Google ngram counts.  All ngrams with counts less than 40 have been
-       omitted.  Thus for example we cannot use n0(ab) instead of n0(ab_),  or
-       n1(b_)  instead  of  n2(_b_).   Secondly,  the  discount factor formula
-       N1/(N1+2*N2) does not work for the highest order because we don't  know
-       N1  or  N2.   In fact the best D is empirically found to be close to 40
-       because the minimum n0 number it will be subtracted from  is  40.   The
-       best  D  for lower order ngrams can still be computed using the formula
-       or by optimization.
-
-
-OPTIONS
-       -p  google-ngram-path
-              Specify the location of the google ngram data;  the  default  is
-              the current directory.
-
-
-       -a     Print  out  the  counts of the matching ngrams for each pattern;
-              the default is only to print out the aggregate  counts  for  the
-              pattern.   This  is  useful  if you are trying to figure out the
-              most likely words that complete a given pattern.   The  printing
-              of  actual ngram counts is supressed for patterns that only con-
-              sist of wildcards.
-
-
-       -2     Turn on the counting and printing of n2.  By default n2  is  not
-              printed  which  saves  some  memory  when  the n2 counts are not
-              needed.
-
-
-       -0     Turn on the printing of zero count  patterns.   By  default  any
-              pattern  with  a zero count will not be printed.  However having
-              the counts for the complete list of input patterns is  sometimes
-              useful for debugging.
-
-
-BUGS
-       None whatsoever.
-
-
-AUTHOR
-       Deniz Yuret <dyuret@ku.edu.tr>.
-
-
-SEE ALSO
-       S. F. Chen and J. Goodman, ``An Empirical Study of Smoothing Techniques
-       for Language Modeling,''  TR-10-98,  Computer  Science  Group,  Harvard
-       Univ., 1998.
-
-
-
-Web1T Tools              $Date: 2008/01/29 09:20:47 $               glookup(1)
+The glookup.pl script quickly searches for a given pattern in
+uncompressed Google Web1T data. Use the C version for bulk processing,
+the perl version to get a few counts quickly.
