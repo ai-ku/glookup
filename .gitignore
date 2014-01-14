@@ -1,8 +1,12 @@
 RCS/
 deprecated/
+release/
+unused/
 glookup
 glookup.txt
 glookup-1.*/
 *.o
-release/
-unused/
+*.i
+*.s
+foo*
+*~
